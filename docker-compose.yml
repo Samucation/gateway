@@ -25,6 +25,32 @@ services:
       # por dentro da rede. Expor a Admin API é entregar o roteamento inteiro.
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_STATUS_LISTEN: "0.0.0.0:8100"
+
+      # ── identidade e IP do cliente ───────────────────────────────────────
+      # Não vaza qual software é o gateway (Via/Server/X-Kong-*). O plugin
+      # `response-transformer` NÃO alcança esses headers de core — só isto.
+      KONG_HEADERS: "off"
+
+      # ⚠️ Sem isto o Kong enxerga como cliente o IP de quem ABRIU a conexão —
+      # e quem abre é sempre o `cloudflared`, aqui da própria máquina. Duas
+      # consequências, as duas ruins:
+      #
+      #   1. `ip-restriction` vira decoração. A rota do operador do
+      #      cafe-mobile-erp (/v1/platform, que enxerga TODOS os clientes) só
+      #      libera faixas privadas — e o túnel chega justamente de 172.23.0.1,
+      #      que é privado. Medido: devolvia 401 (passou) em vez de 404.
+      #   2. `rate-limiting` com `limit_by: ip` põe a internet inteira num
+      #      balde só: um abusador leva todo mundo a 429 junto.
+      #
+      # `CF-Connecting-IP`, e não `X-Forwarded-For`: a Cloudflare SOBRESCREVE
+      # esse header na borda dela, então o cliente não consegue forjar. O XFF é
+      # lista e aceita item novo na frente — o cafe-mobile-erp usava XFF, e
+      # aqui ele sobe para o header não-forjável.
+      KONG_REAL_IP_HEADER: "CF-Connecting-IP"
+      KONG_REAL_IP_RECURSIVE: "on"
+      # quem tem permissão de DIZER qual é o IP do cliente: só a própria
+      # máquina e as redes docker dos projetos
+      KONG_TRUSTED_IPS: "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
       # 🐞 O motivo de metade da memória: por padrão o Kong sobe UM worker por
       # núcleo — nesta máquina, 32. Para um gateway doméstico com 5 apps, 2
       # workers atendem de sobra e o consumo cai de ~2,2 GB para ~250 MB.

@@ -62,6 +62,11 @@ const PROJETOS = [
     id: "plataforma",
     config: "cafe-mobile-erp/kong/kong.yml",
     hosts: ["cafe-api.cursodetecnologia.dev.br"],
+    // Operação da casa: não responde pelo domínio público, só pelo apelido
+    // interno. `/v1/platform` enxerga TODOS os clientes e `/painel` é a tela
+    // que a consome. Ver `rotasInternas` abaixo.
+    rotasInternas: ["api-operador", "web-painel"],
+    hostInterno: "cafe.interno",
     redes: ["cafe-mobile-erp_default"],
   },
   {
@@ -100,7 +105,7 @@ const erros = [];
  * histórico de bugs que a moldou (o `read_timeout` de 1 h do SSE, o
  * `host.docker.internal` que derrubou o site em 04/08).
  */
-function prepararServices(yamlTexto, hosts, projetoId) {
+function prepararServices(yamlTexto, hosts, projetoId, internas = [], hostInterno = null) {
   const doc = parseDocument(yamlTexto);
   const services = doc.get("services");
   if (!services || !services.items) return null;
@@ -111,6 +116,9 @@ function prepararServices(yamlTexto, hosts, projetoId) {
   // topo referencia as rotas, e é depois de renomear que a referência quebraria
   const porRota = new Map();
   const porServico = new Map();
+  // quais nomes de `rotasInternas` casaram de verdade — nome errado aqui
+  // deixaria a rota PÚBLICA calada, que é o pior desfecho possível
+  const internasAchadas = new Set();
 
   for (const service of services.items) {
     // nome do SERVICE: prefixa, mas NÃO recebe hosts (host é de rota)
@@ -123,23 +131,79 @@ function prepararServices(yamlTexto, hosts, projetoId) {
     const routes = service.get("routes");
     if (!routes?.items) continue;
 
+    // rotas de bloqueio a criar depois — mexer em `routes.items` no meio da
+    // iteração faria o laço visitar o que ele mesmo acabou de inserir
+    const bloqueios = [];
+
     for (const rota of routes.items) {
       const nome = rota.get("name");
       if (nome) porRota.set(String(nome), rota);
       if (nome && !String(nome).startsWith(projetoId)) {
         rota.set("name", `${projetoId}-${nome}`);
       }
+      // Rota de operação: recebe SÓ o apelido interno, nunca o domínio público.
+      //
+      // É proteção que NÃO depende de confiar em cabeçalho. O `ip-restriction`
+      // depende: ele só sabe o IP real do cliente porque a Cloudflare põe o
+      // `CF-Connecting-IP`. Aqui a rota simplesmente não existe para o host
+      // público — o Kong devolve 404 antes de rodar plugin nenhum, e não há
+      // header que mude isso.
+      //
+      // `nome` ainda é o nome ORIGINAL: o prefixo só entra na linha acima, e
+      // comparar depois de prefixar exigiria remontar a string.
+      const ehInterna = internas.includes(String(nome ?? ""));
+      if (ehInterna) internasAchadas.add(String(nome));
+      const hostsDaRota = ehInterna ? [hostInterno] : hosts;
+
       // é AQUI, e só aqui, que o host entra — plugin e service não têm host
-      rota.set("hosts", hosts);
+      rota.set("hosts", hostsDaRota);
       rotas++;
 
       const paths = rota.get("paths");
       for (const p of paths?.items ?? []) {
-        for (const h of hosts) paresHostCaminho.push({ host: h, path: String(p) });
+        for (const h of hostsDaRota) paresHostCaminho.push({ host: h, path: String(p) });
+      }
+
+      // 🐞 Tirar a rota do host público NÃO fecha o caminho. O cafe-mobile-erp
+      // tem uma rota `/`, que casa por PREFIXO: sem esta gêmea, `/painel`
+      // simplesmente caía no `/` e era servido do mesmo jeito — só que pela
+      // rota do site, sem o `ip-restriction`. Medido: `/v1/platform` vindo da
+      // internet passou de 404 (barrado) para 401 (chegou na aplicação).
+      //
+      // Ou seja: a primeira tentativa de "fechar" a rota a deixou MENOS
+      // protegida. Por isso o bloqueio é explícito — `request-termination`
+      // devolvendo 404 no host público. Ganha do `/` porque o caminho é mais
+      // específico, e não depende de header nenhum para valer.
+      if (ehInterna) {
+        bloqueios.push({
+          name: `${projetoId}-${nome}-bloqueio-publico`,
+          hosts: [...hosts],
+          paths: (paths?.items ?? []).map((p) => String(p)),
+          strip_path: false,
+          // 🐞 Sem `methods` a gêmea PERDIA para a rota do site no GET, e só
+          // ganhava no POST — bloqueio que funciona no método que ninguém usa.
+          // O Kong prioriza a rota com mais critérios de casamento, e o site
+          // declara `methods: [GET, OPTIONS]`. Empatados os critérios, vence o
+          // caminho mais longo — e `/painel` é mais longo que `/`.
+          methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+          plugins: [
+            {
+              name: "request-termination",
+              config: { status_code: 404, message: "Not Found" },
+            },
+          ],
+        });
+      }
+    }
+
+    for (const b of bloqueios) {
+      routes.items.push(doc.createNode(b));
+      for (const p of b.paths) {
+        for (const h of b.hosts) paresHostCaminho.push({ host: h, path: p });
       }
     }
   }
-  return { doc, services, rotas, paresHostCaminho, porRota, porServico };
+  return { doc, services, rotas, paresHostCaminho, porRota, porServico, internasAchadas };
 }
 
 /**
@@ -255,10 +319,29 @@ async function main() {
       continue;
     }
 
-    const preparado = prepararServices(yaml, proj.hosts, proj.id);
+    if (proj.rotasInternas?.length && !proj.hostInterno) {
+      erros.push(`${proj.id}: declarou rotasInternas sem hostInterno — elas ficariam sem host`);
+      continue;
+    }
+
+    const preparado = prepararServices(
+      yaml,
+      proj.hosts,
+      proj.id,
+      proj.rotasInternas ?? [],
+      proj.hostInterno ?? null
+    );
     if (!preparado) {
       erros.push(`${proj.id}: bloco services: vazio ou ilegível em ${proj.config}`);
       continue;
+    }
+
+    // nome de rota interna que não casou com nada: a rota que se queria
+    // fechar continua PÚBLICA, e nada no resultado denuncia isso
+    for (const nome of proj.rotasInternas ?? []) {
+      if (!preparado.internasAchadas.has(nome)) {
+        erros.push(`${proj.id}: rotasInternas cita "${nome}", que não existe em ${proj.config}`);
+      }
     }
 
     // reancora o `plugins:` de topo ANTES de levar os services embora — depois

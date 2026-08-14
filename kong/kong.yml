@@ -667,7 +667,7 @@ services:
                 paths: [ /v1/platform ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts: [ cafe.interno ],
                 plugins:
                   [
                     {
@@ -837,6 +837,17 @@ services:
                         config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
                       }
                   ]
+              },
+            {
+                name: plataforma-api-operador-bloqueio-publico,
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                paths: [ /v1/platform ],
+                strip_path: false,
+                methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
+                plugins:
+                  [
+                    { name: request-termination, config: { status_code: 404, message: Not Found } }
+                  ]
               }
           ],
         plugins:
@@ -926,92 +937,47 @@ services:
           [
             {
                 name: plataforma-web-publico,
-                paths: [ /, /inicio, /painel, /portal ],
+                paths: [ /, /inicio, /portal ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # O painel do OPERADOR, separado do resto do site.
+          #
+          # ⚠️ Rota própria por segurança, não por organização: ele estava junto de
+          # `/` e `/portal`, e por isso herdava o mesmo host público. Como a API que
+          # ele consome (`/v1/platform`) só responde de faixa privada, o painel
+          # aberto na internet não vazava DADO — mas anunciava que existe um painel
+          # de operação e qual é o caminho dele, o que é meio caminho andado.
+          #
+          # Separado, ele recebe o mesmo tratamento da API do operador: no gateway
+          # único ele fica preso ao host INTERNO, e o `ip-restriction` abaixo o
+          # protege mesmo se este Kong local voltar a subir sozinho.
+            {
+                name: plataforma-web-painel,
+                paths: [ /painel ],
+                strip_path: false,
+                methods: [ GET, OPTIONS ],
+                hosts: [ cafe.interno ],
                 plugins:
                   [
                     {
-                        # Cabeçalhos de segurança nas telas.
+                        # A MESMA lista para a tela que consome essa API. Sem isto o painel abria
+                      # para qualquer um e só quebrava na primeira chamada — que é a pior forma de
+                      # negar acesso, porque já contou o que existe antes de negar.
                       #
-                      # O `shelf` já manda `x-frame-options: SAMEORIGIN`, `x-content-type-options`
-                      # e `x-xss-protection` por conta própria. Aqui o gateway **substitui** o
-                      # primeiro por `DENY`: o portal do operador dentro de um iframe alheio é
-                      # clickjacking pronto, e ele não precisa se embutir nem em si mesmo.
-                      #
-                      # `replace` e não `add` de propósito: `add` só age quando o cabeçalho não
-                      # existe, então com o `shelf` na frente ele seria um no-op silencioso.
-                      #
-                      # `remove` no `x-powered-by`: dizer a versão da stack a quem pergunta é
-                      # entregar meio caminho de qualquer varredura.
-                        name: response-transformer,
+                      # ⚠️ Isto só vale se o Kong souber o IP REAL do cliente. Atrás do túnel da
+                      # Cloudflare quem abre a conexão é o `cloudflared`, da própria máquina, e sem
+                      # `KONG_REAL_IP_HEADER`/`KONG_TRUSTED_IPS` a internet inteira chega como
+                      # endereço privado — a lista abaixo vira decoração. Medido em 14/08/2026: a
+                      # rota do operador devolvia 401 (passou) onde devia devolver 404.
+                        name: ip-restriction,
                         config:
                           {
-                            replace: { headers: [ "X-Frame-Options: DENY" ] },
-                            add:
-                              {
-                                headers:
-                                  [
-                                    "X-Content-Type-Options: nosniff",
-                                    "Referrer-Policy: same-origin",
-
-                                    # ── Content-Security-Policy ──
-                                  #
-                                  # A defesa que faltava, e a mais valiosa: sem ela, uma injeção de
-                                  # HTML em qualquer campo que a tela ecoa vira script rodando com a
-                                  # credencial do atendente na memória da aba.
-                                  #
-                                  # ⚠️ `'unsafe-inline'` está aqui de propósito, e é uma concessão
-                                  # consciente: as telas são HTML com <script> e onclick embutidos.
-                                  # Tirar exigiria reescrever as quatro telas com nonce, e uma CSP
-                                  # que quebra a mesa enquanto ninguém está olhando é pior que uma
-                                  # CSP imperfeita.
-                                  #
-                                  # Mesmo com ela, o que fica BARRADO já é a maior parte do ataque:
-                                  #   • script de OUTRO domínio (o jeito usual de exfiltrar);
-                                  #   • <object>/<embed>, que contornam filtro de script;
-                                  #   • <base href>, que sequestra todo caminho relativo da página;
-                                  #   • formulário postando para fora (form-action);
-                                  #   • a página dentro de um iframe alheio (frame-ancestors).
-                                  #
-                                  # `connect-src 'self'`: o fetch da tela só fala com a nossa origem.
-                                  # É o que impede um script injetado de mandar a credencial embora.
-                                    "Content-Security-Policy: default-src
-                                      'self'; script-src 'self' 'unsafe-inline';
-                                      style-src 'self' 'unsafe-inline'; img-src
-                                      'self' data:; font-src 'self'; connect-src
-                                      'self'; object-src 'none'; base-uri
-                                      'self'; form-action 'self';
-                                      frame-ancestors 'none'",
-
-                                    # Nenhuma tela nossa usa câmera, microfone ou localização. Declarar
-                                  # isso corta o abuso antes de existir — e um dia em que alguém
-                                  # embutir algo de terceiro, o pedido de permissão não vai nem
-                                  # chegar ao usuário.
-                                    "Permissions-Policy: camera=(),
-                                      microphone=(), geolocation=(), payment=(),
-                                      usb=()",
-
-                                    # Vale só sob HTTPS (o navegador ignora vindo de HTTP), então hoje
-                                  # não muda nada aqui — está posto para o dia do domínio real.
-                                  # Sem `includeSubDomains` e sem `preload` de propósito: os dois são
-                                  # difíceis de desfazer, e travariam um subdomínio que ainda não
-                                  # tem certificado.
-                                    "Strict-Transport-Security:
-                                      max-age=31536000"
-                                  ]
-                              },
-                            remove:
-                              {
-                                headers:
-                                  [
-                                    "X-Powered-By",
-                                    # A versão exata do gateway é meio caminho de qualquer varredura:
-                                  # quem sabe "kong/3.8.0" procura direto as falhas dessa versão.
-                                    "Server"
-                                  ]
-                              }
+                            allow: [ 127.0.0.1/32, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 ],
+                            status: 404,
+                            message: "Not Found"
                           }
                       }
                   ]
@@ -1067,6 +1033,17 @@ services:
                         config: { minute: 120, policy: local, limit_by: ip, fault_tolerant: true }
                       }
                   ]
+              },
+            {
+                name: plataforma-web-painel-bloqueio-publico,
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                paths: [ /painel ],
+                strip_path: false,
+                methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
+                plugins:
+                  [
+                    { name: request-termination, config: { status_code: 404, message: Not Found } }
+                  ]
               }
           ],
         plugins:
@@ -1086,6 +1063,91 @@ services:
               # gigante é recusado **antes** de virar memória no processo Dart.
                 name: request-size-limiting,
                 config: { allowed_payload_size: 8, size_unit: megabytes }
+              },
+            {
+                # Cabeçalhos de segurança nas telas.
+              #
+              # O `shelf` já manda `x-frame-options: SAMEORIGIN`, `x-content-type-options`
+              # e `x-xss-protection` por conta própria. Aqui o gateway **substitui** o
+              # primeiro por `DENY`: o portal do operador dentro de um iframe alheio é
+              # clickjacking pronto, e ele não precisa se embutir nem em si mesmo.
+              #
+              # `replace` e não `add` de propósito: `add` só age quando o cabeçalho não
+              # existe, então com o `shelf` na frente ele seria um no-op silencioso.
+              #
+              # `remove` no `x-powered-by`: dizer a versão da stack a quem pergunta é
+              # entregar meio caminho de qualquer varredura.
+              #
+              # Escopo no SERVIÇO, e não na rota `web-publico`: assim toda tela nova nasce
+              # protegida em vez de nascer descoberta e esperar alguém lembrar. Foi o que
+              # aconteceu com o `/painel`, que ficou sem CSP até 14/08/2026 só porque a rota
+              # dele não estava nesta lista. O `/docs` tem o conjunto próprio e continua
+              # ganhando, porque no Kong a rota vence o serviço.
+                name: response-transformer,
+                config:
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          [
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: same-origin",
+
+                            # ── Content-Security-Policy ──
+                          #
+                          # A defesa que faltava, e a mais valiosa: sem ela, uma injeção de
+                          # HTML em qualquer campo que a tela ecoa vira script rodando com a
+                          # credencial do atendente na memória da aba.
+                          #
+                          # ⚠️ `'unsafe-inline'` está aqui de propósito, e é uma concessão
+                          # consciente: as telas são HTML com <script> e onclick embutidos.
+                          # Tirar exigiria reescrever as quatro telas com nonce, e uma CSP
+                          # que quebra a mesa enquanto ninguém está olhando é pior que uma
+                          # CSP imperfeita.
+                          #
+                          # Mesmo com ela, o que fica BARRADO já é a maior parte do ataque:
+                          #   • script de OUTRO domínio (o jeito usual de exfiltrar);
+                          #   • <object>/<embed>, que contornam filtro de script;
+                          #   • <base href>, que sequestra todo caminho relativo da página;
+                          #   • formulário postando para fora (form-action);
+                          #   • a página dentro de um iframe alheio (frame-ancestors).
+                          #
+                          # `connect-src 'self'`: o fetch da tela só fala com a nossa origem.
+                          # É o que impede um script injetado de mandar a credencial embora.
+                            "Content-Security-Policy: default-src 'self';
+                              script-src 'self' 'unsafe-inline'; style-src
+                              'self' 'unsafe-inline'; img-src 'self' data:;
+                              font-src 'self'; connect-src 'self'; object-src
+                              'none'; base-uri 'self'; form-action 'self';
+                              frame-ancestors 'none'",
+
+                            # Nenhuma tela nossa usa câmera, microfone ou localização. Declarar
+                          # isso corta o abuso antes de existir — e um dia em que alguém
+                          # embutir algo de terceiro, o pedido de permissão não vai nem
+                          # chegar ao usuário.
+                            "Permissions-Policy: camera=(), microphone=(),
+                              geolocation=(), payment=(), usb=()",
+
+                            # Vale só sob HTTPS (o navegador ignora vindo de HTTP), então hoje
+                          # não muda nada aqui — está posto para o dia do domínio real.
+                          # Sem `includeSubDomains` e sem `preload` de propósito: os dois são
+                          # difíceis de desfazer, e travariam um subdomínio que ainda não
+                          # tem certificado.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove:
+                      {
+                        headers:
+                          [
+                            "X-Powered-By",
+                            # A versão exata do gateway é meio caminho de qualquer varredura:
+                          # quem sabe "kong/3.8.0" procura direto as falhas dessa versão.
+                            "Server"
+                          ]
+                      }
+                  }
               }
           ]
       },

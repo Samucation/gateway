@@ -158,16 +158,66 @@ página do **portal** não manda, e fica sem cabeçalho nenhum — enquadrável.
 Kong antigo se comportava igual. Corrigir pede `add:` ao lado do `replace:`,
 mas é mudança de comportamento do projeto, fora do escopo do corte.
 
-## Pendente de decisão do Samuel
+## 🔒 O IP do cliente — o que sustenta metade das defesas
 
-**O túnel do `cafe-api` aponta para uma porta morta.** No `config.yml` do
-cloudflared, `cafe-api.cursodetecnologia.dev.br` manda para `localhost:8080` —
-onde não há nada escutando (o Kong do projeto estava na 8020). O domínio
-responde **502 hoje**, e já respondia antes da migração.
+**Sem `KONG_REAL_IP_HEADER`, o Kong acha que todo mundo é o `cloudflared`.**
+Quem abre a conexão é o túnel, da própria máquina, então o IP visto é privado
+(`172.23.0.1`). Duas consequências, as duas silenciosas:
 
-Apontar para a `8050` conserta. Mas isso **volta a expor a API publicamente**,
-e exposição pública é decisão do Samuel (R17) — por isso não foi feito junto
-com o corte.
+1. **`ip-restriction` vira decoração.** A rota do operador do cafe-mobile-erp
+   só libera faixas privadas — e o túnel chega justamente como faixa privada.
+   Medido: `/v1/platform` devolvia **401** (chegou na aplicação) onde devia
+   devolver 404.
+2. **`rate-limiting` com `limit_by: ip` põe a internet num balde só.** Um
+   abusador leva todos os usuários a 429 junto, e o log culpa o túnel.
+
+Os quatro projetos já configuravam isso; **o gateway não**, e eu só descobri
+comparando as variáveis de ambiente de cada compose com as minhas. Agora ele
+usa `CF-Connecting-IP` — e não `X-Forwarded-For`, porque a Cloudflare
+**sobrescreve** aquele na borda e o cliente não consegue forjar; o XFF é lista
+e aceita item novo na frente.
+
+Provado: requisição vinda da internet aparece no log com o IPv6 público real;
+a local, com `172.24.0.1`.
+
+> ⚠️ `liveflow-kong` está rodando **sem** essas variáveis, apesar de o compose
+> dele as declarar — foi subido por outro caminho. Ou seja, o Urupix hoje
+> limita taxa pelo IP do túnel. Cortar o Kong dele **conserta isso de brinde**.
+
+## Rotas internas — proteção que não depende de header
+
+Rotas de operação (`rotasInternas` no gerador) recebem **só o apelido interno**,
+nunca o domínio público. `/v1/platform` e `/painel` do cafe-mobile-erp são as
+primeiras: a API enxerga todos os clientes, e o painel é a tela que a consome.
+
+**Só isso não bastou, e a primeira tentativa deixou o sistema MENOS seguro.**
+O projeto tem uma rota `/`, que casa por prefixo: tirar `/painel` do host
+público não fechou o caminho — fez o pedido cair no `/` e ser servido pela rota
+do site, **sem o `ip-restriction`**. Medido: `/v1/platform` da internet passou
+de 404 para 401.
+
+Por isso cada rota interna ganha uma **gêmea de bloqueio** no host público, com
+`request-termination` devolvendo 404. E ela precisa declarar `methods`: sem
+isso perdia para a rota do site no GET e só bloqueava no POST — um bloqueio que
+funciona no método que ninguém usa.
+
+Hoje, da internet, os seis métodos devolvem 404 nas duas rotas; pelo
+`cafe.interno` as duas seguem funcionando.
+
+## `cafe-api` agora está no ar (era 502)
+
+O túnel apontava para `localhost:8080`, morta desde que o Kong do projeto foi
+para a 8020 — o domínio devolvia **502 antes da migração**. Agora entra pelo
+gateway.
+
+⚠️ Editar o `config.yml` do cloudflared **pelo PowerShell 5.1 quebrou o
+túnel**: `Get-Content -Raw` lê UTF-8 como ANSI e a regravação corrompe os
+bytes; o serviço sobe e morre em seguida, derrubando o Urupix junto. Editar
+preservando o encoding e **validar antes de reiniciar**:
+
+```bash
+cloudflared --config <caminho> tunnel ingress validate   # a flag vem ANTES do subcomando
+```
 
 ## Frontend
 
