@@ -90,6 +90,17 @@ services:
                 # Não vaza cabeçalhos internos do Kong pro cliente.
                 name: response-transformer,
                 config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 12 MB: o proprio app limita thumbnail em 8 MB (MAX_UPLOAD_BYTES em
+              # src/lib/thumbnails.ts) e o multipart soma algum cabecalho por cima.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 12, size_unit: megabytes }
               }
           ]
       },
@@ -496,6 +507,17 @@ services:
                 # Não vaza cabeçalhos internos do Kong pro cliente.
                 name: response-transformer,
                 config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 12 MB: o proprio app limita thumbnail em 8 MB (MAX_UPLOAD_BYTES em
+              # src/lib/thumbnails.ts) e o multipart soma algum cabecalho por cima.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 12, size_unit: megabytes }
               }
           ]
       },
@@ -700,6 +722,17 @@ services:
                     credentials: false,
                     max_age: 3600
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 4 MB: aqui so trafega JSON de webhook de adquirente e chamada de API.
+              # Corpo maior que isso nao e uso, e este e o servico que move dinheiro.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 4, size_unit: megabytes }
               }
           ]
       },
@@ -1381,9 +1414,19 @@ services:
                     add:
                       {
                         headers:
-                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
-                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+                          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+                          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+                          #
+                          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+                          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+                          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+                          # X-Frame-Options — justo a tela que tem sessao para roubar.
                           [
+                            "X-Frame-Options: DENY",
+
+                            # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
                             "Content-Security-Policy: default-src 'none';
                               frame-ancestors 'none'",
                             "X-Content-Type-Options: nosniff",
@@ -1395,6 +1438,18 @@ services:
                       },
                     remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+              # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+              # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 32, size_unit: megabytes }
               }
           ]
       },
@@ -1481,9 +1536,19 @@ services:
                     add:
                       {
                         headers:
-                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
-                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+                          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+                          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+                          #
+                          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+                          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+                          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+                          # X-Frame-Options — justo a tela que tem sessao para roubar.
                           [
+                            "X-Frame-Options: DENY",
+
+                            # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
                             "Content-Security-Policy: default-src 'none';
                               frame-ancestors 'none'",
                             "X-Content-Type-Options: nosniff",
@@ -1495,6 +1560,18 @@ services:
                       },
                     remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+              # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+              # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 32, size_unit: megabytes }
               }
           ]
       },
@@ -1581,9 +1658,19 @@ services:
                     add:
                       {
                         headers:
-                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
-                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+                          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+                          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+                          #
+                          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+                          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+                          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+                          # X-Frame-Options — justo a tela que tem sessao para roubar.
                           [
+                            "X-Frame-Options: DENY",
+
+                            # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
                             "Content-Security-Policy: default-src 'none';
                               frame-ancestors 'none'",
                             "X-Content-Type-Options: nosniff",
@@ -1595,6 +1682,18 @@ services:
                       },
                     remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+              # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+              # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 32, size_unit: megabytes }
               }
           ]
       },
@@ -1670,9 +1769,19 @@ services:
                     add:
                       {
                         headers:
-                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
-                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+                          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+                          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+                          #
+                          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+                          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+                          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+                          # X-Frame-Options — justo a tela que tem sessao para roubar.
                           [
+                            "X-Frame-Options: DENY",
+
+                            # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
                             "Content-Security-Policy: default-src 'none';
                               frame-ancestors 'none'",
                             "X-Content-Type-Options: nosniff",
@@ -1684,6 +1793,18 @@ services:
                       },
                     remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+              # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+              # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 32, size_unit: megabytes }
               }
           ]
       },
@@ -1793,9 +1914,19 @@ services:
                     add:
                       {
                         headers:
-                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
-                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+                          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+                          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+                          #
+                          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+                          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+                          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+                          # X-Frame-Options — justo a tela que tem sessao para roubar.
                           [
+                            "X-Frame-Options: DENY",
+
+                            # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
                             "Content-Security-Policy: default-src 'none';
                               frame-ancestors 'none'",
                             "X-Content-Type-Options: nosniff",
@@ -1807,6 +1938,18 @@ services:
                       },
                     remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
                   }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+              # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+              # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 32, size_unit: megabytes }
               }
           ]
       },
@@ -1988,6 +2131,16 @@ services:
             {
                 name: response-transformer,
                 config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
+              },
+            {
+                # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+              # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+              # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+              # sem precisar de volume de requisicoes.
+              #
+              # 4 MB: API de pagamento, so JSON.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 4, size_unit: megabytes }
               }
           ]
       }

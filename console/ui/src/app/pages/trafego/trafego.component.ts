@@ -1,6 +1,7 @@
 import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { ActivatedRoute } from '@angular/router';
 
 interface PontoDaSerie { minuto: string; total: number; bloqueadas: number; }
 interface IpVisto {
@@ -38,6 +39,22 @@ interface Trafego {
       }
       <span class="grow"></span>
       @if (carregando()) { <span class="spinner"></span> }
+    </div>
+
+    <div class="toolbar">
+      <select [value]="app()" (change)="mudar('app', $any($event.target).value)">
+        <option value="">todas as aplicacoes</option>
+        @for (a of APPS; track a.id) { <option [value]="a.id">{{ a.nome }}</option> }
+      </select>
+      <select [value]="status()" (change)="mudar('status', $any($event.target).value)">
+        <option value="">todas as respostas</option>
+        @for (c of CODIGOS; track c) { <option [value]="c">{{ c }}</option> }
+      </select>
+      <input type="text" placeholder="filtrar por caminho..." [value]="filtroCaminho()"
+             (change)="mudar('caminho', $any($event.target).value)" />
+      <input type="text" placeholder="filtrar por endereco IP..." [value]="ip()"
+             (change)="mudar('ip', $any($event.target).value)" />
+      @if (temFiltro()) { <button (click)="limpar()">limpar filtros</button> }
     </div>
 
     @if (dados(); as d) {
@@ -181,23 +198,56 @@ export class TrafegoComponent implements OnDestroy {
   readonly LARGURA = 600;
   readonly ALTURA = 180;
 
+  readonly APPS = [
+    { id: 'liveflow', nome: 'Urupix / live-flow' },
+    { id: 'sigmafin', nome: 'Sigma Financeiro' },
+    { id: 'plataforma', nome: 'Plataforma de Atendimento' },
+    { id: 'central', nome: 'Central de IA' },
+    { id: 'sigmapay', nome: 'Sigma Payments' },
+  ];
+  readonly CODIGOS = ['200', '301', '304', '400', '401', '403', '404', '429', '500', '502'];
+
   dados = signal<Trafego | null>(null);
   minutos = signal(15);
+  app = signal('');
+  status = signal('');
+  filtroCaminho = signal('');
+  ip = signal('');
   carregando = signal(false);
   erro = signal<string | null>(null);
   private timer: ReturnType<typeof setInterval>;
 
   constructor() {
+    // a tela de Aplicacoes manda para ca com ?app=..., entao o filtro precisa
+    // nascer da URL; sem isso o link "ver acessos" abriria a visao geral e
+    // pareceria que o clique nao fez nada
+    const q = inject(ActivatedRoute).snapshot.queryParamMap;
+    if (q.get('app')) this.app.set(q.get('app')!);
     this.buscar();
     this.timer = setInterval(() => this.buscar(), 15000);
   }
+
+  mudar(campo: 'app' | 'status' | 'caminho' | 'ip', valor: string) {
+    ({ app: this.app, status: this.status, caminho: this.filtroCaminho, ip: this.ip })[campo].set(valor.trim());
+    this.buscar();
+  }
+  limpar() {
+    this.app.set(''); this.status.set(''); this.filtroCaminho.set(''); this.ip.set('');
+    this.buscar();
+  }
+  temFiltro() { return !!(this.app() || this.status() || this.filtroCaminho() || this.ip()); }
   ngOnDestroy() { clearInterval(this.timer); }
 
   trocarJanela(m: number) { this.minutos.set(m); this.buscar(); }
 
   buscar() {
     this.carregando.set(true);
-    this.http.get<Trafego>(`/api/trafego?minutos=${this.minutos()}`).subscribe({
+    const q = new URLSearchParams({ minutos: String(this.minutos()) });
+    if (this.app()) q.set('app', this.app());
+    if (this.status()) q.set('status', this.status());
+    if (this.filtroCaminho()) q.set('caminho', this.filtroCaminho());
+    if (this.ip()) q.set('ip', this.ip());
+    this.http.get<Trafego>(`/api/trafego?${q}`).subscribe({
       next: (d) => { this.dados.set(d); this.carregando.set(false); },
       error: (e) => { this.erro.set(String(e.message ?? e)); this.carregando.set(false); },
     });

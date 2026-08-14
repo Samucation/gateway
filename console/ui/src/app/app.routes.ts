@@ -11,7 +11,18 @@ export const routes: Routes = [
     path: '',
     component: ShellComponent,
     children: [
-      { path: '', redirectTo: 'projetos', pathMatch: 'full' },
+      { path: '', redirectTo: 'aplicacoes', pathMatch: 'full' },
+
+      // A visao geral: as cinco aplicacoes lado a lado. So virou possivel
+      // depois que o log passou a registrar o host.
+      {
+        path: 'aplicacoes',
+        loadComponent: () => import('./pages/aplicacoes/aplicacoes.component').then(m => m.AplicacoesComponent),
+      },
+      {
+        path: 'incidentes',
+        loadComponent: () => import('./pages/incidentes/incidentes.component').then(m => m.IncidentesComponent),
+      },
 
       // A tela que EDITA. É a razão de o console existir — as de Kong abaixo
       // mostram o que está no ar, esta muda o que vai para o ar.
@@ -38,7 +49,7 @@ export const routes: Routes = [
       { path: 'kong/upstreams', loadComponent: () => import('./pages/kong/kong-upstreams.component').then(m => m.KongUpstreamsComponent) },
       { path: 'kong/status', loadComponent: () => import('./pages/kong/kong-status.component').then(m => m.KongStatusComponent) },
 
-      { path: '**', redirectTo: 'projetos' },
+      { path: '**', redirectTo: 'aplicacoes' },
     ],
   },
 ];

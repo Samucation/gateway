@@ -6,3 +6,4 @@ console/ui/dist/
 console/ui/.angular/
 .tmp-console.log
 .tmp-console.err
+console/dados/

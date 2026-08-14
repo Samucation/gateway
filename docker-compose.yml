@@ -20,7 +20,27 @@ services:
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      # ── log que diz QUAL aplicação foi acessada ──────────────────────────
+      # O formato padrão do Kong traz IP, caminho e status — mas NÃO o host. E
+      # sem host não dá para saber se um `GET /` foi o Urupix, o Sigma ou o
+      # cafe-mobile-erp: os cinco compartilham os mesmos caminhos, que é o
+      # motivo de a unificação exigir `hosts:` em toda rota. Sem este campo, o
+      # painel só consegue somar tudo num balde só.
+      #
+      # Separado por `|` em vez de imitar o formato combinado: aspas dentro do
+      # user-agent quebram expressão regular, e log de segurança que falha de
+      # vez em quando é pior que log nenhum — some justo a linha do ataque.
+      #
+      # 🐞 `$$` e não `$`: o docker compose trata `$var` como variável DELE e
+      # substitui por vazio — o log saiu como `||||||||`, oito campos vazios,
+      # com aparência de bug do Kong. `$$` chega ao nginx como `$`.
+      #
+      # `$uri` e não `$request_uri`: sem a query string. Agrupar por caminho com
+      # query faz cada requisição virar um caminho único, e o "mais pedidos"
+      # deixa de significar qualquer coisa.
+      KONG_NGINX_HTTP_LOG_FORMAT: >-
+        gateway '$$remote_addr|$$host|$$time_local|$$request_method|$$uri|$$status|$$body_bytes_sent|$$request_time|$$http_user_agent'
+      KONG_PROXY_ACCESS_LOG: /dev/stdout gateway
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr

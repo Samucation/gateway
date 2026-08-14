@@ -40,7 +40,7 @@
 // existe porque os anteriores olham para arquivo: só ele prova que o gateway
 // que está no ar atende de verdade.
 import { createServer, request as httpRequest } from "node:http";
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -164,44 +164,115 @@ const SINAIS = {
   naoEncontradosPorIp: 60, // 404 em série é varredura de caminho
 };
 
-const LINHA_DE_LOG =
-  /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) ([^" ]*)[^"]*" (\d{3}) (\d+|-)/;
+/**
+ * Host → aplicação. É o que o formato de log novo permite responder: sem isto,
+ * um `GET /` não diz se foi o Urupix, o Sigma ou o cafe — os cinco usam os
+ * mesmos caminhos, que é justamente o motivo de a unificação exigir `hosts:`.
+ */
+const APP_POR_HOST = {
+  "urupix.com.br": "liveflow",
+  "www.urupix.com.br": "liveflow",
+  "urupix.cursodetecnologia.dev.br": "liveflow",
+  "urupix.interno": "liveflow",
+  "sigma-financeiro.cursodetecnologia.dev.br": "sigmafin",
+  "sigma.interno": "sigmafin",
+  "cafe-api.cursodetecnologia.dev.br": "plataforma",
+  "cafe.interno": "plataforma",
+  "central.interno": "central",
+  "sigma-payments.interno": "sigmapay",
+};
+const NOME_DA_APP = Object.fromEntries(PROJETOS.map((p) => [p.id, p.nome]));
+
+/** Onde o histórico sobrevive ao container e à rotação do log do docker. */
+const DADOS = path.join(import.meta.dirname, "dados");
+const ARQ_INCIDENTES = path.join(DADOS, "incidentes.jsonl");
+const ARQ_AMOSTRAS = path.join(DADOS, "amostras.jsonl");
+
+async function anexar(arquivo, obj) {
+  await mkdir(DADOS, { recursive: true });
+  await appendFile(arquivo, JSON.stringify(obj) + "\n", "utf8");
+}
+
+async function lerJsonl(arquivo, limite = 5000) {
+  try {
+    const texto = await readFile(arquivo, "utf8");
+    const linhas = texto.trim().split("\n").filter(Boolean).slice(-limite);
+    return linhas.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Converte "14/Aug/2026:18:21:30 +0000" em Date.
+ *
+ * O nginx escreve o mês em inglês abreviado, e `new Date()` não lê esse
+ * formato — sem a tabela, toda linha viraria data inválida e o gráfico ficaria
+ * vazio sem erro nenhum.
+ */
+const MESES = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
+function quandoParaData(s) {
+  const m = /^(\d{2})\/(\w{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})/.exec(s);
+  if (!m) return null;
+  return new Date(Date.UTC(+m[3], MESES[m[2]] ?? 0, +m[1], +m[4], +m[5], +m[6]));
+}
 
 /**
  * Lê o log de acesso do Kong.
  *
- * É a única fonte que tem o IP do cliente: as métricas do Prometheus agregam
- * por rota e status e não sabem QUEM fez o pedido — servem para o gráfico, não
+ * É a única fonte que tem o IP do cliente E o host: as métricas do Prometheus
+ * agregam por rota e status e não sabem QUEM pediu — servem para o gráfico, não
  * para achar o abusador.
  */
-async function trafego(minutos = 15) {
+async function trafego(minutos = 15, filtro = {}) {
   const { saida } = await rodar("docker", ["logs", CONTAINER, "--since", `${minutos}m`], { cwd: RAIZ });
 
   const porIp = new Map();
   const porStatus = new Map();
   const porRota = new Map();
   const porMinuto = new Map();
+  const porApp = new Map();
   let total = 0;
+  let ignoradas = 0;
 
   for (const linha of saida.split("\n")) {
-    const m = LINHA_DE_LOG.exec(linha);
-    if (!m) continue;
-    const [, ip, quando, metodo, caminho, statusTexto] = m;
+    const campos = linha.split("|");
+    // 9 campos = formato novo. Linha antiga (de antes da troca) não tem host e
+    // é descartada de propósito: misturar os dois formatos daria número certo
+    // no total e errado por aplicação, que é pior do que faltar dado.
+    if (campos.length < 9) { if (linha.trim()) ignoradas++; continue; }
+    const [ip, host, quando, metodo, caminho, statusTexto, bytes, dur] = campos;
     const status = Number(statusTexto);
+    if (!Number.isFinite(status)) { ignoradas++; continue; }
+
+    const app = APP_POR_HOST[host] ?? "desconhecido";
+
+    if (filtro.app && app !== filtro.app) continue;
+    if (filtro.ip && ip !== filtro.ip) continue;
+    if (filtro.status && String(status) !== String(filtro.status)) continue;
+    if (filtro.caminho && !caminho.includes(filtro.caminho)) continue;
     total++;
 
-    const atual = porIp.get(ip) ?? { ip, total: 0, bloqueadas: 0, semAutorizacao: 0, naoEncontradas: 0, caminhos: new Set() };
+    const atual = porIp.get(ip) ?? { ip, total: 0, bloqueadas: 0, semAutorizacao: 0, naoEncontradas: 0, apps: new Set(), caminhos: new Set() };
     atual.total++;
     if (status === 429) atual.bloqueadas++;
     if (status === 401 || status === 403) atual.semAutorizacao++;
     if (status === 404) atual.naoEncontradas++;
+    atual.apps.add(app);
     if (atual.caminhos.size < 12) atual.caminhos.add(`${metodo} ${caminho}`);
     porIp.set(ip, atual);
 
     porStatus.set(status, (porStatus.get(status) ?? 0) + 1);
     porRota.set(caminho, (porRota.get(caminho) ?? 0) + 1);
 
-    // "14/Aug/2026:16:46:59 +0000" → agrupa por minuto para o gráfico
+    const a = porApp.get(app) ?? { app, nome: NOME_DA_APP[app] ?? app, total: 0, bloqueadas: 0, erros: 0, bytes: 0, duracao: 0 };
+    a.total++;
+    if (status === 429) a.bloqueadas++;
+    if (status >= 500) a.erros++;
+    a.bytes += Number(bytes) || 0;
+    a.duracao += Number(dur) || 0;
+    porApp.set(app, a);
+
     const minuto = quando.slice(0, 17);
     const balde = porMinuto.get(minuto) ?? { minuto, total: 0, bloqueadas: 0 };
     balde.total++;
@@ -210,31 +281,34 @@ async function trafego(minutos = 15) {
   }
 
   const ips = [...porIp.values()]
-    .map((x) => ({ ...x, caminhos: [...x.caminhos] }))
+    .map((x) => ({ ...x, apps: [...x.apps], caminhos: [...x.caminhos] }))
     .sort((a, b) => b.total - a.total);
 
   const alertas = [];
   for (const x of ips) {
     if (x.total >= SINAIS.requisicoesPorIp)
-      alertas.push({ nivel: "alto", ip: x.ip, texto: `${x.total} requisições em ${minutos} min` });
+      alertas.push({ nivel: "alto", ip: x.ip, apps: x.apps, texto: `${x.total} requisições em ${minutos} min` });
     if (x.bloqueadas >= SINAIS.bloqueiosPorIp)
-      alertas.push({ nivel: "alto", ip: x.ip, texto: `levou ${x.bloqueadas} bloqueios (429) e continuou` });
+      alertas.push({ nivel: "alto", ip: x.ip, apps: x.apps, texto: `levou ${x.bloqueadas} bloqueios (429) e continuou` });
     if (x.semAutorizacao >= SINAIS.errosDeAutenticacao)
-      alertas.push({ nivel: "alto", ip: x.ip, texto: `${x.semAutorizacao} respostas 401/403 — varredura de credencial` });
+      alertas.push({ nivel: "alto", ip: x.ip, apps: x.apps, texto: `${x.semAutorizacao} respostas 401/403 — varredura de credencial` });
     if (x.naoEncontradas >= SINAIS.naoEncontradosPorIp)
-      alertas.push({ nivel: "medio", ip: x.ip, texto: `${x.naoEncontradas} respostas 404 — varredura de caminho` });
+      alertas.push({ nivel: "medio", ip: x.ip, apps: x.apps, texto: `${x.naoEncontradas} respostas 404 — varredura de caminho` });
   }
 
+  const apps = [...porApp.values()]
+    .map((a) => ({ ...a, mediaMs: a.total ? Math.round((a.duracao / a.total) * 1000) : 0 }))
+    .sort((a, b) => b.total - a.total);
+
   return {
-    minutos,
-    total,
+    minutos, total, ignoradas,
     bloqueadas: porStatus.get(429) ?? 0,
     serie: [...porMinuto.values()].sort((a, b) => a.minuto.localeCompare(b.minuto)),
     ips: ips.slice(0, 25),
+    apps,
     porStatus: Object.fromEntries([...porStatus.entries()].sort((a, b) => b[1] - a[1])),
     porRota: Object.fromEntries([...porRota.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)),
-    alertas,
-    sinais: SINAIS,
+    alertas, sinais: SINAIS,
   };
 }
 
@@ -403,7 +477,33 @@ const servidor = createServer(async (req, res) => {
 
     if (rota === "/api/trafego") {
       const minutos = Math.min(180, Math.max(1, Number(url.searchParams.get("minutos") ?? 15)));
-      return json(res, 200, await trafego(minutos));
+      const filtro = {
+        app: url.searchParams.get("app") || null,
+        ip: url.searchParams.get("ip") || null,
+        status: url.searchParams.get("status") || null,
+        caminho: url.searchParams.get("caminho") || null,
+      };
+      return json(res, 200, await trafego(minutos, filtro));
+    }
+
+    // Histórico que sobrevive à rotação do log do docker e à recriação do
+    // container — sem isto "relatório de incidentes" seria só a última hora.
+    if (rota === "/api/incidentes") {
+      const app = url.searchParams.get("app");
+      const nivel = url.searchParams.get("nivel");
+      const desde = Number(url.searchParams.get("dias") ?? 7) * 86400000;
+      const corte = Date.now() - desde;
+      let lista = (await lerJsonl(ARQ_INCIDENTES)).filter((i) => Date.parse(i.quando) >= corte);
+      if (app) lista = lista.filter((i) => (i.apps ?? []).includes(app));
+      if (nivel) lista = lista.filter((i) => i.nivel === nivel);
+      return json(res, 200, { total: lista.length, incidentes: lista.reverse().slice(0, 500) });
+    }
+
+    if (rota === "/api/amostras") {
+      const dias = Number(url.searchParams.get("dias") ?? 2);
+      const corte = Date.now() - dias * 86400000;
+      const lista = (await lerJsonl(ARQ_AMOSTRAS)).filter((a) => Date.parse(a.quando) >= corte);
+      return json(res, 200, { amostras: lista });
     }
 
     if (rota === "/api/projetos") {
@@ -509,6 +609,16 @@ async function vigiar() {
     const t = await trafego(15);
     const agora = Date.now();
 
+    // amostra periódica: é o que permite ver "acessos do mês passado" depois
+    // que o log do docker já rodou. Uma linha a cada 5 min, por aplicação.
+    await anexar(ARQ_AMOSTRAS, {
+      quando: new Date().toISOString(),
+      janelaMin: t.minutos,
+      total: t.total,
+      bloqueadas: t.bloqueadas,
+      apps: t.apps.map((a) => ({ app: a.app, total: a.total, bloqueadas: a.bloqueadas, erros: a.erros, mediaMs: a.mediaMs })),
+    });
+
     for (const [chave, quando] of jaAvisado) {
       if (agora - quando > LEMBRAR_MS) jaAvisado.delete(chave);
     }
@@ -523,6 +633,7 @@ async function vigiar() {
 
     for (const a of novos) {
       console.log(`[alerta ${a.nivel}] ${a.ip} — ${a.texto}`);
+      await anexar(ARQ_INCIDENTES, { quando: new Date().toISOString(), ...a });
     }
     if (!WEBHOOK) return;
 
