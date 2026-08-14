@@ -1,0 +1,7 @@
+{
+  "name": "gateway",
+  "private": true,
+  "type": "module",
+  "scripts": { "gerar": "node scripts/gerar-kong.mjs" },
+  "dependencies": { "yaml": "^2.5.0" }
+}

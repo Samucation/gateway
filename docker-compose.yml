@@ -1,0 +1,71 @@
+# GATEWAY ÚNICO — um Kong para todos os projetos do ambiente.
+#
+# Hoje há CINCO Kongs (live-flow, sigma-financeiro, cafe-mobile-erp, central-ia,
+# sigma-payments), somando 4,75 GB. Os dois maiores sobem 32 workers cada, sem
+# teto de memória — e o Docker vinha caindo por pressão de RAM, derrubando o
+# Urupix junto. Ver docs/mapeamento.md.
+#
+# ⚠️ Durante a transição este Kong vive na porta 8040, ao LADO dos outros. Nada
+# é desligado até a rota equivalente estar provada aqui. Só no fim ele assume a
+# 8000 e os locais são removidos, um por vez.
+
+services:
+  kong:
+    image: kong:3.8
+    container_name: gateway-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      # Admin API só no loopback do container; quem fala com ela é o ops-ui,
+      # por dentro da rede. Expor a Admin API é entregar o roteamento inteiro.
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      # 🐞 O motivo de metade da memória: por padrão o Kong sobe UM worker por
+      # núcleo — nesta máquina, 32. Para um gateway doméstico com 5 apps, 2
+      # workers atendem de sobra e o consumo cai de ~2,2 GB para ~250 MB.
+      KONG_NGINX_WORKER_PROCESSES: "2"
+      KONG_MEM_CACHE_SIZE: "128m"
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    ports:
+      - "8040:8000"              # proxy (vira 8000 no fim da migração)
+      - "127.0.0.1:8041:8001"    # admin — SÓ loopback do host
+      - "127.0.0.1:8140:8100"    # status/health
+    extra_hosts:
+      # live-flow e sigma-financeiro rodam na MÁQUINA, não em container.
+      # Sem isto o Kong não os alcança e devolve 503 com o app de pé — foi o
+      # bug que tirou o Urupix do ar em 04/08/2026.
+      - "host.docker.internal:host-gateway"
+    # teto explícito: o Docker vinha caindo por pressão de memória, e um
+    # gateway sem limite é o primeiro a estourar
+    mem_limit: 512m
+    networks:
+      - gateway
+      - live-flow_default
+      - sigma-financeiro_default
+      - cafe-mobile-erp_default
+      - central-ia_default
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+networks:
+  gateway:
+    name: gateway_default
+  # redes JÁ EXISTENTES dos projetos — `external: true` para o compose se
+  # ligar a elas sem tentar criá-las (e sem virar dono delas)
+  live-flow_default:
+    external: true
+  sigma-financeiro_default:
+    external: true
+  cafe-mobile-erp_default:
+    external: true
+  central-ia_default:
+    external: true

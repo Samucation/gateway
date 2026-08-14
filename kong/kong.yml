@@ -1,0 +1,934 @@
+# GERADO por scripts/gerar-kong.mjs — NÃO editar à mão.
+
+# Para mudar uma rota, mude no kong.yml do PROJETO e rode o gerador de novo.
+# Editar aqui faz a mudança sumir na próxima geração, e ninguém entende por quê.
+
+# Cada rota carrega `hosts:` porque sete caminhos são disputados por dois ou
+# três projetos (/, /admin, /api/webhooks…). Sem host, o Kong entrega a página
+# do projeto errado SEM registrar erro. Ver docs/mapeamento.md.
+
+_format_version: "3.0"
+_transform: true
+plugins:
+  - name: correlation-id
+  - name: cors
+  - name: prometheus
+services:
+  [
+    {
+        name: liveflow-sse,
+        url: http://host.docker.internal:3100,
+        retries: 0,
+        connect_timeout: 3000,
+        write_timeout: 3600000,
+        read_timeout: 3600000, # 1h
+        routes:
+          [
+            {
+                name: liveflow-overlay-streams,
+                paths: [ "/api/overlay/stream", "/api/overlay/goal-stream" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET ],
+                plugins:
+                  # sem rate-limit apertado: o overlay reconecta sozinho e é 1 conexão
+                  # longa por página (limitar aqui derrubaria live legítima).
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+
+    {
+        name: liveflow-app,
+        url: http://host.docker.internal:3100, # o app roda na MÁQUINA, não em container
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 30000,
+        read_timeout: 30000,
+        routes:
+          # --- Webhooks das operadoras (público; HMAC verificado no app) ---
+          [
+            {
+                name: liveflow-webhooks,
+                paths: [ "/api/webhooks" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 6000, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- Health (público; sonda de LB/gateway) ---
+            {
+                name: liveflow-payments-health,
+                paths: [ "/api/payments/health" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- OAuth token (público; rate-limit por IP anti-força-bruta) ---
+            {
+                name: liveflow-payments-oauth,
+                paths: [ "/api/payments/oauth" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- API pública de pagamentos (o app ainda checa auth+escopo+limite por app) ---
+            {
+                name: liveflow-payments-api,
+                paths: [ "/api/payments/v1" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET, POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 600,
+                            hour: 30000,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: ip
+                          }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- Docs/Swagger: em prod, idealmente restringir ou mover p/ subdomínio
+          #     próprio (expor toda a superfície na borda é recon fácil). Aqui fica
+          #     liberado só p/ homologação; em prod, comente ou proteja. ---
+            {
+                name: liveflow-payments-docs,
+                paths: [ "/api/payments/docs", "/api/payments/openapi", "/payments-docs" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- Admin: autorização é do APP (allowlist dura + 2FA + break-glass). Na
+          #     borda fica só o rate-limit apertado. NOTA: a ip-restriction de redes
+          #     internas foi REMOVIDA de propósito — com o IP REAL do visitante ativo
+          #     (KONG_REAL_IP_HEADER=CF-Connecting-IP), ela bloquearia o próprio dono
+          #     acessando /admin por urupix.com.br (IP residencial ≠ rede interna). ---
+            {
+                name: liveflow-admin,
+                paths: [ "/admin", "/api/admin" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    { name: rate-limiting, config: { minute: 120, policy: local, limit_by: ip } }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # ===================================================================
+          # SEGMENTAÇÃO POR ÁREA DO PRODUTO — é isto que transforma o gateway em
+          # ferramenta de DIAGNÓSTICO. Sem separar, tudo cai num balde só e o
+          # relatório diz "o app está lento" sem dizer ONDE. Com estas rotas, a
+          # tela Admin → APIs → Gateway mostra latência/erros/volume POR ÁREA.
+          # Kong casa o caminho MAIS ESPECÍFICO primeiro; "/" fica por último.
+          # ===================================================================
+
+          # Assets estáticos: são muitos e muito rápidos — se ficassem juntos,
+          # diluiriam a latência real das páginas e esconderiam o gargalo.
+            {
+                name: liveflow-assets,
+                paths:
+                  [
+                    "/_next",
+                    "/urupix",
+                    "/login-bg",
+                    "/consoles",
+                    "/store",
+                    "/vozes",
+                    "/favicon.ico",
+                    "/icon.png"
+                  ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 6000, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # PÁGINA DE DOAÇÃO (/d/slug) — o coração do negócio: é onde o FÃ entra.
+          # Lentidão aqui = doação perdida. Merece métrica isolada.
+            {
+                name: liveflow-donate-page,
+                paths: [ "/d" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # API interna do Urupix (criar doação, status, painel…) — onde mora o
+          # trabalho pesado (banco + adquirente). Principal suspeito de gargalo.
+            {
+                name: liveflow-urupix-api,
+                paths: [ "/api/urupix" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # PAINEL DO STREAMER (uso logado, consultas mais pesadas: relatórios,
+          # analytics, carteira).
+            {
+                name: liveflow-dashboard,
+                paths: [ "/dashboard", "/api/analytics", "/api/reports" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # OVERLAYS do OBS (páginas do browser source; o STREAM fica no serviço
+          # liveflow-sse, com timeout longo).
+            {
+                name: liveflow-overlay-pages,
+                paths: [ "/overlay", "/api/overlay" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 2400, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # AUTENTICAÇÃO (login, 2FA, callbacks) — limite mais apertado: é alvo
+          # clássico de força-bruta.
+            {
+                name: liveflow-auth,
+                paths: [ "/login", "/2fa", "/api/auth", "/api/2fa" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 300, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # PORTAL DO DESENVOLVEDOR
+            {
+                name: liveflow-dev-portal,
+                paths: [ "/developers", "/api/developers" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              },
+
+            # --- Resto (landing, termos, páginas soltas) ---
+            {
+                name: liveflow-app-default,
+                paths: [ "/" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+    {
+        name: sigmafin-sigma-app,
+        # O serviço roda na MÁQUINA (`npm start -p 3200`), não em container.
+      #
+      # 🐞 Lição herdada do Kong do live-flow (04/08/2026): lá o destino apontava
+      # para o nome do serviço do compose, que não resolvia de dentro do Kong
+      # porque o app não era container — e TODA requisição pública voltou 503
+      # enquanto a porta respondia normalmente na máquina.
+        url: http://host.docker.internal:3200,
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 30000,
+        # 30s: criar cobrança fala com o adquirente. Mais curto que o timeout do
+      # adaptador (que já tem o seu) faria o Kong cortar uma cobrança que o
+      # adquirente ia aceitar — e aí existiria cobrança no provedor sem registro.
+        read_timeout: 30000,
+
+        routes:
+          # ==================================================================
+          # WEBHOOK DOS ADQUIRENTES — o volume mais imprevisível
+          # ==================================================================
+          # Limite ALTO: um pico de pagamentos é normal, e recusar aqui faria o
+          # adquirente reentregar (barulho) ou desistir (dinheiro sem confirmar).
+          # A rota já é protegida por token e, mais importante, o serviço reconsulta
+          # o provedor — corpo forjado não vira pagamento.
+          [
+            {
+                name: sigmafin-webhooks-adquirentes,
+                paths: [ "/api/webhooks" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 6000, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            # ==================================================================
+          # API PÚBLICA — o que os clientes consomem
+          # ==================================================================
+          # Limite por IP, não por chave: o Kong não sabe de chave (é o serviço que
+          # autentica). O limite POR APLICAÇÃO já existe lá dentro, no Postgres.
+          # Aqui é só o teto bruto contra quem entrou em laço.
+            {
+                name: sigmafin-api-v1,
+                paths: [ "/api/v1" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET, POST, PATCH ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 1200,
+                            hour: 40000,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: ip
+                          }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            # ==================================================================
+          # CRON — SÓ de dentro da máquina
+          # ==================================================================
+          # Quem alcança esta rota força entrega de webhook. Não é catastrófico, mas
+          # é carga gratuita para quem descobrir a URL. Ela é chamada por um
+          # agendador local, então a restrição de IP aqui não incomoda ninguém.
+            {
+                name: sigmafin-cron,
+                paths: [ "/api/cron" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: ip-restriction,
+                        config: { allow: [ "127.0.0.1", "::1", "172.16.0.0/12", "192.168.0.0/16" ] }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            # ==================================================================
+          # ADMIN — alvo clássico
+          # ==================================================================
+          # A autorização é do APP (allowlist no código + 2FA obrigatório + sessão
+          # revogável). Na borda fica só o limite apertado, porque é aqui que
+          # alguém tentaria adivinhar senha e código de seis dígitos.
+          #
+          # NOTA: não há ip-restriction aqui de propósito. Ela bloquearia o próprio
+          # dono acessando de um IP residencial — foi exatamente o que aconteceu no
+          # Urupix quando o IP real do visitante passou a ser repassado.
+            {
+                name: sigmafin-admin,
+                paths: [ "/admin", "/api/admin" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    { name: rate-limiting, config: { minute: 120, policy: local, limit_by: ip } }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            # ==================================================================
+          # PORTAL PÚBLICO — formulário humano
+          # ==================================================================
+            {
+                name: sigmafin-portal,
+                paths: [ "/portal", "/api/portal" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            # Assets: muitos e muito rápidos. Juntos com as páginas, diluiriam a
+          # latência real e esconderiam onde está o gargalo.
+            {
+                name: sigmafin-assets,
+                paths: [ "/_next", "/favicon.ico" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 6000, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+
+            {
+                name: sigmafin-raiz,
+                paths: [ "/" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+    {
+        name: plataforma-api,
+        url: http://plataforma-app:8080,
+        # Timeouts curtos na borda: requisição pendurada aqui é conexão presa
+      # que não atende mais ninguém.
+        connect_timeout: 5000,
+        write_timeout: 30000,
+        read_timeout: 30000,
+        retries: 2,
+        routes:
+          [
+            {
+                name: plataforma-api-mensageria,
+                paths: [ /v1/messaging ],
+                strip_path: false,
+                methods: [ GET, POST, PUT, DELETE, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # Operação da plataforma: só nós. Ganha lista de IP abaixo.
+            {
+                name: plataforma-api-operador,
+                paths: [ /v1/platform ],
+                strip_path: false,
+                methods: [ GET, POST, PUT, DELETE, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # Cadastro e login: as ÚNICAS rotas que respondem sem credencial
+          # nenhuma, e por isso as únicas em que o teto por IP é a defesa
+          # principal e não o complemento. Rota própria para ter teto próprio —
+          # afrouxar o limite da API não pode afrouxar o do login junto.
+            {
+                name: plataforma-api-porta-de-entrada,
+                paths: [ /v1/signup, /v1/login ],
+                strip_path: false,
+                methods: [ POST, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # A mesa do atendente, em /atendimento.
+          #
+          # 🐞 Faltava, e o efeito era cruel: a tela ABRIA (GET cai na rota `/`
+          # do site) e todo botão dela morria em "no Route matched" — assumir,
+          # responder, encerrar. Parecia tela quebrada, não gateway faltando
+          # rota.
+          #
+          # Precisa de POST e de CORS porque quem chama é o NAVEGADOR do
+          # atendente, não um servidor.
+            {
+                name: plataforma-api-mesa-do-atendente,
+                paths: [ /v1/atendimento ],
+                strip_path: false,
+                # PUT entra para os AJUSTES do cliente (os tempos do semáforo).
+              #
+              # 🐞 Faltou quando a rota nasceu, e o sintoma foi o mesmo de antes: a
+              # tela abre, o formulário envia, e o gateway devolve "no Route
+              # matched" — que não parece erro de rota, parece tela quebrada.
+              # Método novo no app pede método novo aqui, sempre.
+                methods: [ GET, POST, PUT, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # Marketing e pós-venda. Rota SEPARADA da mesa de propósito: são
+          # finalidades diferentes, e o dia em que uma delas precisar de um limite
+          # ou de um cabeçalho próprio, ela já está isolada aqui.
+          #
+          # ⚠️ Inclui a exportação do CSV e o apagamento (LGPD). São as duas
+          # chamadas mais sensíveis do produto — uma tira a base inteira do nosso
+          # controle, a outra é irreversível.
+            {
+                name: plataforma-api-marketing,
+                paths: [ /v1/marketing ],
+                strip_path: false,
+                methods: [ GET, POST, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # O repasse do nosso próprio bot. Rota separada porque ele é chamado
+          # por NÓS mesmos (o worker de entrega), não por uma pessoa — o teto de
+          # 10/min da porta de entrada o estrangularia numa campanha.
+          # A autenticação é a assinatura HMAC, conferida na aplicação.
+            {
+                name: plataforma-api-atendimento-da-casa,
+                paths: [ /v1/atendimento/concluido ],
+                strip_path: false,
+                methods: [ POST ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+
+    # Webhook dos provedores. Serviço separado de propósito: quem chama é o
+  # Telegram e a Meta, o volume é diferente do resto e um pico de update não
+  # pode consumir o teto do que os clientes chamam.
+    {
+        name: plataforma-webhooks,
+        url: http://plataforma-app:8080,
+        connect_timeout: 5000,
+        write_timeout: 15000,
+        read_timeout: 15000,
+        # Sem retentativa: o provedor já reenvia sozinho, e repetir daqui
+      # entregaria a mesma mensagem duas vezes ao cliente final.
+        retries: 0,
+        routes:
+          [
+            {
+                name: plataforma-webhooks-provedores,
+                paths: [ ~/v1/messaging/webhooks/.* ],
+                strip_path: false,
+                methods: [ GET, POST ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+
+    # Telas e documentação. Estáticas e públicas.
+    {
+        name: plataforma-web,
+        url: http://plataforma-app:8080,
+        connect_timeout: 5000,
+        read_timeout: 15000,
+        routes:
+          [
+            {
+                name: plataforma-web-publico,
+                paths: [ /, /inicio, /painel, /portal ],
+                strip_path: false,
+                methods: [ GET, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              },
+
+            # Documentação. Rota separada por causa da CSP — ver o plugin abaixo.
+            {
+                name: plataforma-web-docs,
+                paths: [ /docs ],
+                strip_path: false,
+                methods: [ GET, OPTIONS ],
+                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+    {
+        name: central-transcricao,
+        url: http://motor:3300,
+        retries: 0, # 🐞 retry aqui é DINHEIRO: reenviar um áudio já transcrito
+        # cobraria os minutos duas vezes do cliente. Quem decide repetir é quem
+      # chamou, olhando o campo `retry` da recusa.
+        connect_timeout: 3000,
+        write_timeout: 120000,
+        read_timeout: 120000,
+        routes:
+          [
+            {
+                name: central-transcricoes,
+                paths: [ "/v1/audio/transcriptions" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 600,
+                            policy: local,
+                            fault_tolerant: true,
+                            # Por CHAVE, não por IP. Por IP seria errado nos dois sentidos:
+                          # OpusChat e live-flow saem do mesmo host e dividiriam um limite
+                          # que deveria ser de cada um; e um cliente atrás de NAT seria
+                          # estrangulado pelos vizinhos.
+                            limit_by: header,
+                            header_name: authorization
+                          }
+                      }
+                  ],
+                hosts: [ central.interno ]
+              }
+          ]
+      },
+
+    # ── SÍNTESE: rápida, e o cliente está esperando ─────────────────────────
+    {
+        name: central-voz,
+        url: http://motor:3300,
+        retries: 0,
+        connect_timeout: 3000,
+        write_timeout: 15000,
+        read_timeout: 15000,
+        routes:
+          [
+            {
+                name: central-fala,
+                paths: [ "/v1/audio/speech" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 1200,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: header,
+                            header_name: authorization
+                          }
+                      }
+                  ],
+                hosts: [ central.interno ]
+              }
+          ]
+      },
+
+    # ── TEXTO: modelo de linguagem demora mais ──────────────────────────────
+    {
+        name: central-conversa,
+        url: http://motor:3300,
+        retries: 0,
+        connect_timeout: 3000,
+        write_timeout: 120000,
+        read_timeout: 120000,
+        routes:
+          [
+            {
+                name: central-conversa,
+                paths: [ "/v1/chat/completions" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 300,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: header,
+                            header_name: authorization
+                          }
+                      }
+                  ],
+                hosts: [ central.interno ]
+              }
+          ]
+      },
+
+    # ── SAÚDE: público, e de propósito ──────────────────────────────────────
+  #
+  # É o número que diz se vale crescer a placa. Métrica que exige login
+  # ninguém olha — e o objetivo dela é justamente ser olhada, inclusive por um
+  # monitor externo.
+    {
+        name: central-saude,
+        url: http://motor:3300,
+        retries: 1,
+        connect_timeout: 2000,
+        read_timeout: 5000,
+        routes:
+          [
+            {
+                name: central-saude,
+                paths: [ "/health", "/v1/uso" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ GET ],
+                hosts: [ central.interno ]
+              }
+          ]
+      },
+
+    # ── PORTAL: as telas ────────────────────────────────────────────────────
+    {
+        name: central-portal,
+        url: http://portal:3301,
+        retries: 1,
+        connect_timeout: 3000,
+        read_timeout: 30000,
+        routes:
+          # Autenticação primeiro, com limite apertado: é alvo clássico de força
+          # bruta, e o Kong casa o caminho mais específico antes.
+          [
+            {
+                name: central-portal-entrada,
+                paths:
+                  [
+                    "/portal/entrar",
+                    "/portal/criar-conta",
+                    "/portal/esqueci",
+                    "/api/portal",
+                    "/admin/entrar",
+                    "/api/admin/entrar",
+                    "/api/admin/dois-fatores"
+                  ],
+                strip_path: false,
+                preserve_host: true,
+                plugins: [ { name: rate-limiting, config: { minute: 60, policy: local, limit_by: ip } } ],
+                hosts: [ central.interno ]
+              },
+
+            {
+                name: central-portal-admin,
+                paths: [ "/admin", "/api/admin" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    { name: rate-limiting, config: { minute: 300, policy: local, limit_by: ip } }
+                  ],
+                hosts: [ central.interno ]
+              },
+
+            {
+                name: central-portal-resto,
+                paths: [ "/" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ central.interno ]
+              }
+          ]
+      },
+    {
+        name: sigmapay-sigma-payments,
+        url: http://app:8080,
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 30000,
+        read_timeout: 30000,
+        routes:
+          # --- Public webhook ingestion ----------------------------------
+          # No auth at the gateway. Webhook HMAC signature is verified
+          # inside the service (`IuguWebhookSignatureVerifier`). Rate-limit
+          # is set high enough to absorb Iugu retry storms but tight enough
+          # to drop a flood.
+          [
+            {
+                name: sigmapay-webhooks,
+                paths: [ "/v1/webhooks" ],
+                strip_path: false,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 6000, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ sigma-payments.interno ]
+              },
+
+            # --- Customer endpoints ----------------------------------------
+            {
+                name: sigmapay-customers,
+                paths: [ "/v1/customers" ],
+                strip_path: false,
+                methods: [ GET, POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 600,
+                            hour: 30000,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: ip
+                          }
+                      }
+                  ],
+                hosts: [ sigma-payments.interno ]
+              },
+
+            # --- Charges + refunds -----------------------------------------
+            {
+                name: sigmapay-charges,
+                paths: [ "/v1/charges" ],
+                strip_path: false,
+                methods: [ GET, POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 600,
+                            hour: 30000,
+                            policy: local,
+                            fault_tolerant: true,
+                            limit_by: ip
+                          }
+                      }
+                  ],
+                hosts: [ sigma-payments.interno ]
+              },
+
+            # --- Admin ------------------------------------------------------
+          # Authorization is enforced by Spring Security (`ROLE_ADMIN`),
+          # but the gateway adds belt-and-braces:
+          #   * Only callers from internal networks (10.0.0.0/8, the
+          #     compose network) get past the IP restriction.
+          #   * Tight rate limit — admin operations are rare; spikes are
+          #     a sign of script abuse or accident.
+            {
+                name: sigmapay-admin,
+                paths: [ "/v1/admin" ],
+                strip_path: false,
+                plugins:
+                  [
+                    {
+                        name: ip-restriction,
+                        config: { allow: [ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.1/32 ] }
+                      },
+                    { name: rate-limiting, config: { minute: 120, policy: local, limit_by: ip } }
+                  ],
+                hosts: [ sigma-payments.interno ]
+              },
+
+            # --- Public health probes for upstream LBs ---------------------
+            {
+                name: sigmapay-actuator-public,
+                paths: [ /actuator/health, /actuator/info ],
+                strip_path: false,
+                methods: [ GET ],
+                hosts: [ sigma-payments.interno ]
+              },
+
+            # --- Swagger UI + OpenAPI JSON --------------------------------
+          # Convenience route for local-dev so integrators can browse the
+          # spec through the gateway. In production this route is typically
+          # disabled (or moved behind a separate "docs.sigma.veltora.com"
+          # subdomain with its own auth) — exposing the full surface of the
+          # API at the public edge is a recon goldmine.
+            {
+                name: sigmapay-docs,
+                paths:
+                  [
+                    /swagger-ui,
+                    /swagger-ui.html,
+                    /v3/api-docs,
+                    /webjars,
+                    /openapi.yaml,
+                    /openapi.yml
+                  ],
+                strip_path: false,
+                methods: [ GET ],
+                hosts: [ sigma-payments.interno ]
+              }
+          ]
+      }
+  ]
