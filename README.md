@@ -82,13 +82,33 @@ mesmo caminho pareceriam idênticos olhando só o status.
 
 ## Ordem do corte (do menor risco para o maior)
 
-1. `central-ia` — sem domínio público
+1. ~~`central-ia`~~ ✅ **CORTADO em 14/08/2026** — `central-kong` removido
 2. `cafe-mobile-erp` — API interna
 3. `sigma-financeiro`
 4. `live-flow` — **por último**: é o que tem live em produção
 
-Cada corte: apontar o túnel para a 8050 → conferir → remover o Kong local.
-Reverter é reapontar o túnel de volta.
+### ⚠️ O corte NÃO é só remover o container
+
+O Kong **ignora a porta** ao casar `hosts:` — provado: `Host: urupix.com.br:9999`
+casa igual. Então `localhost:8030` casaria como `localhost`, que nenhum projeto
+pode reivindicar sozinho sem roubar os outros.
+
+Por isso cada projeto sem domínio público ganha um **apelido no `hosts` do
+Windows** (`central.interno`, `sigma-payments.interno` → 127.0.0.1), e os
+consumidores passam a usar `http://<apelido>:8050`.
+
+Procedimento por projeto:
+
+1. apelido no `hosts` (exige admin) ou domínio público já existente;
+2. **achar os consumidores** — `grep` pela porta antiga no workspace inteiro;
+3. repontar cada consumidor e reiniciar quem precisar;
+4. comparar rota a rota, **pelo conteúdo**, não pelo status;
+5. `docker rm` do Kong local;
+6. comentar o serviço no compose do projeto, senão ele volta no próximo `up`.
+
+**Corte 1 — central-ia (feito):** o consumidor não era óbvio — era o
+**live-flow**, em `CENTRAL_URL` (`src/lib/ai.ts`, geração de descrição por IA).
+Remover o container sem repontar teria quebrado a IA do Urupix, longe da causa.
 
 ## Frontend
 
