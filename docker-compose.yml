@@ -5,9 +5,12 @@
 # teto de memória — e o Docker vinha caindo por pressão de RAM, derrubando o
 # Urupix junto. Ver docs/mapeamento.md.
 #
-# ⚠️ Durante a transição este Kong vive na porta 8040, ao LADO dos outros. Nada
-# é desligado até a rota equivalente estar provada aqui. Só no fim ele assume a
-# 8000 e os locais são removidos, um por vez.
+# ✅ MIGRAÇÃO CONCLUÍDA em 14/08/2026 — os cinco Kongs locais foram removidos e
+# este atende todo mundo, separando os projetos pelo cabeçalho `Host`.
+#
+# Ele ficou na 8050 mesmo, e não assumiu a 8000 como se planejou no começo: o
+# túnel aponta para cá pelo hostname, então a porta virou detalhe interno. Mudar
+# para a 8000 só criaria mais uma janela de indisponibilidade sem ganho nenhum.
 
 services:
   kong:

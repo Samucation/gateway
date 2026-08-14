@@ -7,7 +7,30 @@ O motivo não é organização: o Docker vinha **caindo por pressão de memória
 derrubando o Urupix junto, no meio de live. Os dois maiores Kongs sobem 32
 workers cada e rodam sem teto.
 
-## Estado: fundação pronta, nada cortado ainda
+## ✅ Migração concluída — 14/08/2026
+
+Os **cinco** Kongs locais foram removidos. `gateway-kong` atende todos os
+projetos em **~190 MB**, contra os **4,75 GB** que os cinco somavam.
+
+| | Antes | Agora |
+|---|---:|---:|
+| Containers de gateway | 5 | **1** |
+| Memória | 4,75 GB | **190 MB** |
+
+Ele ficou na **8050** e não assumiu a 8000: o túnel roteia por hostname, então
+a porta virou detalhe interno — mudar só criaria outra janela de queda.
+
+### Ganhos de segurança que vieram junto
+
+| | |
+|---|---|
+| `KONG_REAL_IP_HEADER` | o `liveflow-kong` rodava **sem** — todos os visitantes do Urupix dividiam um balde de rate-limit |
+| `/v1/platform`, `/painel`, `/api/cron` | fechados na internet (404), só por apelido interno |
+| `/painel` do cafe-mobile-erp | **estava sem CSP**; agora os cabeçalhos são do serviço, não da rota |
+| `cors` | seguiu com a allowlist de cada projeto (um global teria liberado `*`) |
+| `KONG_HEADERS: off` | o gateway não anuncia mais qual software é |
+
+## Estado da construção
 
 | Etapa | |
 |---|---|
@@ -115,12 +138,30 @@ mesmo caminho pareceriam idênticos olhando só o status.
 1. ~~`central-ia`~~ ✅ **CORTADO em 14/08/2026** — `central-kong` removido
 2. ~~`cafe-mobile-erp`~~ ✅ **CORTADO em 14/08/2026** — `plataforma-kong` removido
 3. ~~`sigma-financeiro`~~ ✅ **CORTADO em 14/08/2026** — `sigma-kong` removido (2,3 GB)
-4. `live-flow` — **por último**: é o que tem live em produção. 2,34 GB
+4. ~~`live-flow`~~ ✅ **CORTADO em 14/08/2026** — `liveflow-kong` removido (2,37 GB)
 
-**3 de 4 cortados. 2,3 GB já liberados.** Cada corte pequeno serviu para achar
-um erro de procedimento antes de chegar no que tem live: o consumidor escondido
+**Os quatro cortados.** Cada corte pequeno serviu para achar um erro de
+procedimento antes de chegar no que tem live: o consumidor escondido
 (central-ia), os plugins descartados (cafe-mobile-erp) e o watchdog que
-ressuscita o container (sigma-financeiro).
+ressuscita o container (sigma-financeiro). O do live-flow, o mais arriscado,
+não teve surpresa nenhuma — porque as três anteriores já tinham cobrado o
+preço.
+
+### Corte 4 — live-flow, o de produção
+
+Feito com **zero live no ar**, conferido antes: nenhuma amostra em `LiveSample`
+nos últimos 15 min (a última era de 8 h antes) e **zero conexões SSE** — que é
+o que o overlay do OBS abre e mantém durante a transmissão.
+
+| | |
+|---|---|
+| 18 rotas | mesmo status e mesmo corpo¹ |
+| SSE do overlay | `read_timeout`/`write_timeout` de 1 h e `retries: 0` preservados |
+| 6 cabeçalhos de segurança em `/`, `/login`, `/admin` | iguais |
+| CORS | recusa origem invasora, aceita a allowlist |
+| Kong antigo **pausado** | os três domínios seguiram em 200 |
+
+¹ só o `time` do `/api/payments/health` diferiu — 44 ms, como tem que diferir.
 
 ### ⚠️ O watchdog desfaz a migração sozinho
 
