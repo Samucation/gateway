@@ -1,1 +1,6 @@
 node_modules/
+.ultimo-bom/
+.tmp-teste/
+console/ui/node_modules/
+console/ui/dist/
+console/ui/.angular/

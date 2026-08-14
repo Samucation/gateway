@@ -6,7 +6,9 @@
     "gerar": "node scripts/gerar-kong.mjs",
     "conferir": "node scripts/conferir-plugins.mjs",
     "ambiente": "node scripts/conferir-ambiente.mjs",
-    "seguranca": "node scripts/conferir-plugins.mjs && node scripts/conferir-ambiente.mjs"
+    "seguranca": "node scripts/conferir-plugins.mjs && node scripts/conferir-ambiente.mjs",
+    "console": "node console/servidor.mjs",
+    "console:ui": "cd console/ui && npx ng build --configuration production --output-path dist"
   },
   "dependencies": {
     "yaml": "^2.5.0"

@@ -1,0 +1,44 @@
+[
+  {
+    "context": ["/api/kong-status"],
+    "target": "http://localhost:8100",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/kong-status": "" }
+  },
+  {
+    "context": ["/api/kong"],
+    "target": "http://localhost:8001",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/kong": "" }
+  },
+  {
+    "context": ["/api/app"],
+    "target": "http://localhost:8080",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/app": "" }
+  },
+  {
+    "context": ["/api/prom"],
+    "target": "http://localhost:9090",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/prom": "" }
+  },
+  {
+    "context": ["/api/keycloak-admin"],
+    "target": "http://localhost:8089",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/keycloak-admin": "" }
+  },
+  {
+    "context": ["/api/ops"],
+    "target": "http://localhost:8082",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/api/ops": "" }
+  }
+]
