@@ -7,12 +7,13 @@
 # três projetos (/, /admin, /api/webhooks…). Sem host, o Kong entrega a página
 # do projeto errado SEM registrar erro. Ver docs/mapeamento.md.
 
+# `plugins:` de topo fica VAZIO de propósito. Todo plugin mora dentro do
+# serviço ou da rota do projeto que o declarou: os cinco configuram
+# `cors` de um jeito diferente, e um `cors` global sem `origins` libera `*`.
+
 _format_version: "3.0"
 _transform: true
-plugins:
-  - name: correlation-id
-  - name: cors
-  - name: prometheus
+plugins: []
 services:
   [
     {
@@ -40,6 +41,49 @@ services:
                       }
                   ],
                 hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://urupix.com.br,
+                        https://urupix.cursodetecnologia.dev.br,
+                        http://localhost:3100
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, Idempotency-Key, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                # bandwidth_metrics: liga o tráfego (entrada/saída) por rota — usado no relatório
+              # de CAPACIDADE do admin. per_consumer fica off: a autenticação é do app, então
+              # o Kong não conhece "quem" (a segmentação por aplicação vem do ApiAuditLog).
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalhos internos do Kong pro cliente.
+                name: response-transformer,
+                config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
               }
           ]
       },
@@ -301,6 +345,49 @@ services:
                   ],
                 hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
               }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://urupix.com.br,
+                        https://urupix.cursodetecnologia.dev.br,
+                        http://localhost:3100
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, Idempotency-Key, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                # bandwidth_metrics: liga o tráfego (entrada/saída) por rota — usado no relatório
+              # de CAPACIDADE do admin. per_consumer fica off: a autenticação é do app, então
+              # o Kong não conhece "quem" (a segmentação por aplicação vem do ApiAuditLog).
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalhos internos do Kong pro cliente.
+                name: response-transformer,
+                config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
+              }
           ]
       },
     {
@@ -467,6 +554,33 @@ services:
                   ],
                 hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
               }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid#counter, echo_downstream: true }
+              },
+            {
+                # MÉTRICAS por rota — é o que transforma o gateway em ferramenta de
+              # diagnóstico em vez de só um proxy.
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true, bandwidth_metrics: true }
+              },
+            {
+                # CORS fechado por padrão. Esta API é servidor-para-servidor: um `*` aqui
+              # convidaria integração pelo navegador, que significa chave de API dentro do
+              # JavaScript de alguém — ou seja, chave pública.
+                name: cors,
+                config:
+                  {
+                    origins: [ "https://sigma.invalido" ],
+                    methods: [ GET, POST, PATCH, OPTIONS ],
+                    headers: [ Authorization, Content-Type, X-Sigma-Token ],
+                    credentials: false,
+                    max_age: 3600
+                  }
+              }
           ]
       },
     {
@@ -485,7 +599,66 @@ services:
                 paths: [ /v1/messaging ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # ── por rota ──
+
+                      # Anti-abuso bruto, por IP. Deliberadamente folgado: o teto que vale para
+                      # um cliente é o do contrato dele, aplicado na aplicação. Este aqui existe
+                      # para quem ainda não tem contrato nenhum.
+                        name: rate-limiting,
+                        config:
+                          {
+                            minute: 600,
+                            hour: 20000,
+                            policy: local,
+                            limit_by: ip,
+                            fault_tolerant: true,
+                            hide_client_headers: false
+                          }
+                      },
+                    {
+                        name: cors,
+                        config:
+                          {
+                            origins: [ http://localhost:8000, http://localhost:8080 ],
+                            methods: [ GET, POST, PUT, DELETE, OPTIONS ],
+                            headers:
+                              [
+                                Authorization,
+                                Content-Type,
+                                Idempotency-Key,
+                                X-Client-Name,
+                                X-Request-Id
+                              ],
+                            exposed_headers: [ X-Request-Id, RateLimit-Remaining ],
+                            credentials: false,
+                            max_age: 3600
+                          }
+                      },
+                    {
+                        # A API também não precisa anunciar a stack.
+                        name: response-transformer,
+                        config:
+                          {
+                            add:
+                              {
+                                headers:
+                                  # A API devolve JSON. Se algum dia um endpoint devolver HTML por
+                                  # engano — erro não tratado, upload ecoado — o navegador não vai
+                                  # executá-lo.
+                                  [
+                                    "Content-Security-Policy: default-src
+                                      'none'; frame-ancestors 'none'",
+                                    "X-Content-Type-Options: nosniff"
+                                  ]
+                              },
+                            remove: { headers: [ "X-Powered-By", "Server" ] }
+                          }
+                      }
+                  ]
               },
 
             # Operação da plataforma: só nós. Ganha lista de IP abaixo.
@@ -494,7 +667,30 @@ services:
                 paths: [ /v1/platform ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # A operação é nossa e o volume é humano. Teto apertado: chamada de mais
+                      # aqui é varredura, não uso.
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, limit_by: ip, fault_tolerant: true }
+                      },
+                    {
+                        # As rotas do operador enxergam TODOS os clientes. Além do escopo
+                      # `platform:admin` na aplicação, elas só respondem de onde a gente opera.
+                      #
+                      # Ajuste `allow` para a sua rede antes de expor. As faixas abaixo são
+                      # privadas — de fábrica, ninguém da internet alcança /v1/platform.
+                        name: ip-restriction,
+                        config:
+                          {
+                            allow: [ 127.0.0.1/32, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 ],
+                            status: 404,
+                            message: "Not Found"
+                          }
+                      }
+                  ]
               },
 
             # Cadastro e login: as ÚNICAS rotas que respondem sem credencial
@@ -506,7 +702,25 @@ services:
                 paths: [ /v1/signup, /v1/login ],
                 strip_path: false,
                 methods: [ POST, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # Cadastro e login. **Teto apertado de propósito**, porque aqui não há
+                      # credencial para limitar por cliente: o IP é tudo que temos.
+                      #
+                      # 10 por minuto é generoso para uma pessoa (que erra a senha duas ou três
+                      # vezes) e miserável para um script (que precisa de milhares). O teto por
+                      # hora existe para o ataque lento, que respeita o limite por minuto e mesmo
+                      # assim testa 600 senhas por hora.
+                      #
+                      # `fault_tolerant: false` aqui, e só aqui: se o limitador falhar, a decisão
+                      # certa é RECUSAR. Nas outras rotas o cliente autenticado tem teto próprio
+                      # na aplicação; nesta, deixar passar sem limite é abrir a força bruta.
+                        name: rate-limiting,
+                        config: { minute: 10, hour: 60, policy: local, limit_by: ip, fault_tolerant: false }
+                      }
+                  ]
               },
 
             # A mesa do atendente, em /atendimento.
@@ -529,7 +743,66 @@ services:
               # matched" — que não parece erro de rota, parece tela quebrada.
               # Método novo no app pede método novo aqui, sempre.
                 methods: [ GET, POST, PUT, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          # ⚠️ O teto aqui é conta, não palpite. Refaça a conta se mexer no
+                          # intervalo do polling.
+                          #
+                          #   5 s de intervalo      -> 12 requisições/minuto POR ATENDENTE
+                          #   50 atendentes na mesma sala, saindo pelo MESMO IP -> 600/min
+                          #
+                          # Com o teto anterior (600) um cliente de 50 pessoas começava a levar
+                          # 429 na própria mesa sem ter feito nada de errado — e o sintoma seria
+                          # "a fila travou", não "estouramos um limite".
+                          #
+                          # 3000/min cabe ~250 atendentes num mesmo IP, e ainda barra o abuso
+                          # (uma varredura passa disso em segundos). A aba escondida cai para
+                          # 20 s por conta própria, então o número real fica bem abaixo.
+                          #
+                          # ⚠️ Limitado por CREDENCIAL, não por IP.
+                          #
+                          # O teto por IP é grosseiro por natureza: um escritório inteiro sai por
+                          # um IP só, e o cliente que cresce vira o cliente que leva 429. Pior,
+                          # ele castiga justamente quem tem mais gente atendendo — o oposto do
+                          # que se quer.
+                          #
+                          # `limit_by: header` no `Authorization` usa a CREDENCIAL como chave.
+                          # Cada cliente passa a ter o próprio balde, e um não afeta o outro.
+                          #
+                          # 📌 O valor do header vira chave do contador dentro do Kong. Com
+                          # `policy: local` isso fica só na memória do processo do gateway, que já
+                          # vê o header inteiro de qualquer jeito — não há segredo novo exposto.
+                          #
+                          # Quem chega SEM credencial cai no `limit_by` de reserva (o IP), que é o
+                          # comportamento certo: sem chave não há cliente para isolar.
+                          {
+                            limit_by: header,
+                            header_name: Authorization,
+                            minute: 3000,
+                            policy: local,
+                            fault_tolerant: true
+                          }
+                      },
+                    {
+                        # CORS só onde navegador chama: a API consumida pelos portais.
+                      #
+                      # `origins` fechado de propósito. `*` com credencial é o que permite um site
+                      # qualquer chamar a nossa API com a chave do cliente logado.
+                        name: cors,
+                        config:
+                          {
+                            origins: [ http://localhost:8020, http://localhost:8080 ],
+                            methods: [ GET, POST, PUT, OPTIONS ],
+                            headers: [ Authorization, Content-Type, X-Request-Id ],
+                            credentials: false,
+                            max_age: 3600
+                          }
+                      }
+                  ]
               },
 
             # Marketing e pós-venda. Rota SEPARADA da mesa de propósito: são
@@ -556,7 +829,33 @@ services:
                 paths: [ /v1/atendimento/concluido ],
                 strip_path: false,
                 methods: [ POST ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
+                  ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid#counter, echo_downstream: true }
+              },
+            {
+                # Métricas por rota e por status, para o Prometheus raspar em /metrics
+              # (porta 8100 do status listener).
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true, per_consumer: false }
+              },
+            {
+                # Teto de corpo na borda. A aplicação também limita, mas aqui o payload
+              # gigante é recusado **antes** de virar memória no processo Dart.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 8, size_unit: megabytes }
               }
           ]
       },
@@ -580,7 +879,39 @@ services:
                 paths: [ ~/v1/messaging/webhooks/.* ],
                 strip_path: false,
                 methods: [ GET, POST ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # O provedor não é navegador e não manda origem: CORS aqui só atrapalharia.
+                      # O que ele precisa é passar rápido — a autenticação é a assinatura dele,
+                      # conferida dentro da aplicação.
+                        name: rate-limiting,
+                        config:
+                          # Folgado: uma live de mensagens ou um lote de status da Meta chega em
+                          # rajada, e recusar update faz o provedor reenviar em laço.
+                          { minute: 6000, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
+                  ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid#counter, echo_downstream: true }
+              },
+            {
+                # Métricas por rota e por status, para o Prometheus raspar em /metrics
+              # (porta 8100 do status listener).
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true, per_consumer: false }
+              },
+            {
+                # Teto de corpo na borda. A aplicação também limita, mas aqui o payload
+              # gigante é recusado **antes** de virar memória no processo Dart.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 8, size_unit: megabytes }
               }
           ]
       },
@@ -598,7 +929,92 @@ services:
                 paths: [ /, /inicio, /painel, /portal ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # Cabeçalhos de segurança nas telas.
+                      #
+                      # O `shelf` já manda `x-frame-options: SAMEORIGIN`, `x-content-type-options`
+                      # e `x-xss-protection` por conta própria. Aqui o gateway **substitui** o
+                      # primeiro por `DENY`: o portal do operador dentro de um iframe alheio é
+                      # clickjacking pronto, e ele não precisa se embutir nem em si mesmo.
+                      #
+                      # `replace` e não `add` de propósito: `add` só age quando o cabeçalho não
+                      # existe, então com o `shelf` na frente ele seria um no-op silencioso.
+                      #
+                      # `remove` no `x-powered-by`: dizer a versão da stack a quem pergunta é
+                      # entregar meio caminho de qualquer varredura.
+                        name: response-transformer,
+                        config:
+                          {
+                            replace: { headers: [ "X-Frame-Options: DENY" ] },
+                            add:
+                              {
+                                headers:
+                                  [
+                                    "X-Content-Type-Options: nosniff",
+                                    "Referrer-Policy: same-origin",
+
+                                    # ── Content-Security-Policy ──
+                                  #
+                                  # A defesa que faltava, e a mais valiosa: sem ela, uma injeção de
+                                  # HTML em qualquer campo que a tela ecoa vira script rodando com a
+                                  # credencial do atendente na memória da aba.
+                                  #
+                                  # ⚠️ `'unsafe-inline'` está aqui de propósito, e é uma concessão
+                                  # consciente: as telas são HTML com <script> e onclick embutidos.
+                                  # Tirar exigiria reescrever as quatro telas com nonce, e uma CSP
+                                  # que quebra a mesa enquanto ninguém está olhando é pior que uma
+                                  # CSP imperfeita.
+                                  #
+                                  # Mesmo com ela, o que fica BARRADO já é a maior parte do ataque:
+                                  #   • script de OUTRO domínio (o jeito usual de exfiltrar);
+                                  #   • <object>/<embed>, que contornam filtro de script;
+                                  #   • <base href>, que sequestra todo caminho relativo da página;
+                                  #   • formulário postando para fora (form-action);
+                                  #   • a página dentro de um iframe alheio (frame-ancestors).
+                                  #
+                                  # `connect-src 'self'`: o fetch da tela só fala com a nossa origem.
+                                  # É o que impede um script injetado de mandar a credencial embora.
+                                    "Content-Security-Policy: default-src
+                                      'self'; script-src 'self' 'unsafe-inline';
+                                      style-src 'self' 'unsafe-inline'; img-src
+                                      'self' data:; font-src 'self'; connect-src
+                                      'self'; object-src 'none'; base-uri
+                                      'self'; form-action 'self';
+                                      frame-ancestors 'none'",
+
+                                    # Nenhuma tela nossa usa câmera, microfone ou localização. Declarar
+                                  # isso corta o abuso antes de existir — e um dia em que alguém
+                                  # embutir algo de terceiro, o pedido de permissão não vai nem
+                                  # chegar ao usuário.
+                                    "Permissions-Policy: camera=(),
+                                      microphone=(), geolocation=(), payment=(),
+                                      usb=()",
+
+                                    # Vale só sob HTTPS (o navegador ignora vindo de HTTP), então hoje
+                                  # não muda nada aqui — está posto para o dia do domínio real.
+                                  # Sem `includeSubDomains` e sem `preload` de propósito: os dois são
+                                  # difíceis de desfazer, e travariam um subdomínio que ainda não
+                                  # tem certificado.
+                                    "Strict-Transport-Security:
+                                      max-age=31536000"
+                                  ]
+                              },
+                            remove:
+                              {
+                                headers:
+                                  [
+                                    "X-Powered-By",
+                                    # A versão exata do gateway é meio caminho de qualquer varredura:
+                                  # quem sabe "kong/3.8.0" procura direto as falhas dessa versão.
+                                    "Server"
+                                  ]
+                              }
+                          }
+                      }
+                  ]
               },
 
             # Documentação. Rota separada por causa da CSP — ver o plugin abaixo.
@@ -607,7 +1023,69 @@ services:
                 paths: [ /docs ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # A documentação. **Sem exceção nenhuma** — era a última que existia.
+                      #
+                      # 🐞 Até 14/08/2026 esta rota abria a CSP para um CDN público, porque a
+                      # página buscava o Swagger UI de lá. Era a única brecha de script de
+                      # terceiro do produto inteiro, e o argumento para tolerá-la ("esta página
+                      # não tem credencial para roubar") estava errado: `/docs` tem o botão de
+                      # experimentar, onde se cola credencial de verdade para testar a API.
+                      #
+                      # Os arquivos agora vêm da nossa própria origem (ver `openapi.dart`), e esta
+                      # rota ficou igual às outras. Se a exceção voltar, a guarda de teste falha.
+                        name: response-transformer,
+                        config:
+                          {
+                            replace: { headers: [ "X-Frame-Options: DENY" ] },
+                            add:
+                              {
+                                headers:
+                                  [
+                                    "X-Content-Type-Options: nosniff",
+                                    "Referrer-Policy: same-origin",
+                                    "Content-Security-Policy: default-src
+                                      'self'; script-src 'self' 'unsafe-inline';
+                                      style-src 'self' 'unsafe-inline'; img-src
+                                      'self' data:; font-src 'self' data:;
+                                      connect-src 'self'; object-src 'none';
+                                      base-uri 'self'; form-action 'self';
+                                      frame-ancestors 'none'",
+                                    "Permissions-Policy: camera=(),
+                                      microphone=(), geolocation=()"
+                                  ]
+                              },
+                            remove: { headers: [ "X-Powered-By" ] }
+                          }
+                      },
+                    {
+                        # Teto próprio: a documentação é lida por gente, não chamada por sistema.
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
+                  ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid#counter, echo_downstream: true }
+              },
+            {
+                # Métricas por rota e por status, para o Prometheus raspar em /metrics
+              # (porta 8100 do status listener).
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true, per_consumer: false }
+              },
+            {
+                # Teto de corpo na borda. A aplicação também limita, mas aqui o payload
+              # gigante é recusado **antes** de virar memória no processo Dart.
+                name: request-size-limiting,
+                config: { allowed_payload_size: 8, size_unit: megabytes }
               }
           ]
       },
@@ -648,6 +1126,71 @@ services:
                   ],
                 hosts: [ central.interno ]
               }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://central-ia.cursodetecnologia.dev.br,
+                        https://central-ia-sandbox.cursodetecnologia.dev.br,
+                        http://localhost:3301
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalho interno do Kong para o cliente.
+                name: response-transformer,
+                config:
+                  # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+                  #
+                  # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+                  # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+                  # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+                  # ja documentada no Kong da plataforma.
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          [
+                            "Content-Security-Policy: default-src 'none';
+                              frame-ancestors 'none'",
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: no-referrer",
+                            # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+                          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
+                  }
+              }
           ]
       },
 
@@ -682,6 +1225,71 @@ services:
                       }
                   ],
                 hosts: [ central.interno ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://central-ia.cursodetecnologia.dev.br,
+                        https://central-ia-sandbox.cursodetecnologia.dev.br,
+                        http://localhost:3301
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalho interno do Kong para o cliente.
+                name: response-transformer,
+                config:
+                  # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+                  #
+                  # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+                  # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+                  # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+                  # ja documentada no Kong da plataforma.
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          [
+                            "Content-Security-Policy: default-src 'none';
+                              frame-ancestors 'none'",
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: no-referrer",
+                            # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+                          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
+                  }
               }
           ]
       },
@@ -718,6 +1326,71 @@ services:
                   ],
                 hosts: [ central.interno ]
               }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://central-ia.cursodetecnologia.dev.br,
+                        https://central-ia-sandbox.cursodetecnologia.dev.br,
+                        http://localhost:3301
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalho interno do Kong para o cliente.
+                name: response-transformer,
+                config:
+                  # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+                  #
+                  # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+                  # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+                  # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+                  # ja documentada no Kong da plataforma.
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          [
+                            "Content-Security-Policy: default-src 'none';
+                              frame-ancestors 'none'",
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: no-referrer",
+                            # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+                          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
+                  }
+              }
           ]
       },
 
@@ -741,6 +1414,71 @@ services:
                 preserve_host: true,
                 methods: [ GET ],
                 hosts: [ central.interno ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://central-ia.cursodetecnologia.dev.br,
+                        https://central-ia-sandbox.cursodetecnologia.dev.br,
+                        http://localhost:3301
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalho interno do Kong para o cliente.
+                name: response-transformer,
+                config:
+                  # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+                  #
+                  # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+                  # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+                  # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+                  # ja documentada no Kong da plataforma.
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          [
+                            "Content-Security-Policy: default-src 'none';
+                              frame-ancestors 'none'",
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: no-referrer",
+                            # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+                          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
+                  }
               }
           ]
       },
@@ -799,6 +1537,71 @@ services:
                       }
                   ],
                 hosts: [ central.interno ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins:
+                      [
+                        https://central-ia.cursodetecnologia.dev.br,
+                        https://central-ia-sandbox.cursodetecnologia.dev.br,
+                        http://localhost:3301
+                      ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers: [ Accept, Authorization, Content-Type, X-Request-Id ],
+                    exposed_headers: [ X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Não vaza cabeçalho interno do Kong para o cliente.
+                name: response-transformer,
+                config:
+                  # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+                  #
+                  # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+                  # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+                  # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+                  # ja documentada no Kong da plataforma.
+                  {
+                    replace: { headers: [ "X-Frame-Options: DENY" ] },
+                    add:
+                      {
+                        headers:
+                          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+                          # nao tratado devolver markup, o navegador nao vai executa-lo.
+                          [
+                            "Content-Security-Policy: default-src 'none';
+                              frame-ancestors 'none'",
+                            "X-Content-Type-Options: nosniff",
+                            "Referrer-Policy: no-referrer",
+                            # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+                          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+                            "Strict-Transport-Security: max-age=31536000"
+                          ]
+                      },
+                    remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] }
+                  }
               }
           ]
       },
@@ -928,6 +1731,58 @@ services:
                 strip_path: false,
                 methods: [ GET ],
                 hosts: [ sigma-payments.interno ]
+              }
+          ],
+        plugins:
+          [
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+              },
+            {
+                name: cors,
+                config:
+                  {
+                    origins: [ http://localhost:3000, http://localhost:5173, https://*.veltora.com ],
+                    methods: [ GET, POST, PUT, PATCH, DELETE, OPTIONS ],
+                    headers:
+                      [
+                        Accept,
+                        Authorization,
+                        Content-Type,
+                        Idempotency-Key,
+                        X-Request-Id,
+                        X-Signature
+                      ],
+                    exposed_headers: [ Idempotency-Replay, X-Request-Id, X-RateLimit-Remaining, Retry-After ],
+                    credentials: true,
+                    max_age: 3600
+                  }
+              },
+            {
+                name: prometheus,
+                config:
+                  {
+                    per_consumer: false,
+                    status_code_metrics: true,
+                    latency_metrics: true,
+                    bandwidth_metrics: true,
+                    upstream_health_metrics: true
+                  }
+              },
+            {
+                # Strip Kong-specific headers from the upstream so the service doesn't
+              # see them in the request, and from the response so we don't leak
+              # gateway internals to clients.
+                name: request-transformer,
+                config:
+                  {
+                    remove: { headers: [ X-Consumer-Id, X-Consumer-Username, X-Credential-Identifier ] }
+                  }
+              },
+            {
+                name: response-transformer,
+                config: { remove: { headers: [ X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via ] } }
               }
           ]
       }

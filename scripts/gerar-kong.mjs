@@ -20,9 +20,23 @@
 //    do projeto errado sem registrar erro. Ver docs/mapeamento.md.
 // 3. **Reprova** se algum projeto não tiver host declarado aqui: melhor falhar
 //    na geração do que descobrir em produção que `/` virou roleta.
+// 4. **Reancora o bloco `plugins:` de topo dentro do projeto de origem.**
+//
+// 🐞 A primeira versão só copiava `services:` e substituía o `plugins:` de topo
+// por três globais (`correlation-id`, `cors`, `prometheus`), assumindo que os
+// cinco projetos os configuravam igual. NÃO configuravam: o `cors` tem CINCO
+// listas de origens diferentes, e um `cors` global sem `config.origins` libera
+// `*` — afrouxa todo mundo de uma vez. Junto foram embora 18 plugins, entre eles
+// o `ip-restriction` do cafe-mobile-erp e o `X-Frame-Options: DENY` da central.
+//
+// Nada disso aparece no código HTTP: a rota responde 200 igual, só que sem a
+// proteção. Foi encontrado comparando plugin a plugin, não navegando.
+//
+// Por isso agora NADA é global. Todo plugin nasce preso ao serviço ou à rota do
+// projeto que o declarou — que é o único escopo em que a config dele é verdade.
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { parseDocument } from "yaml";
+import { Document, parseDocument } from "yaml";
 
 const WORKSPACE = path.resolve("..");
 
@@ -66,8 +80,10 @@ const PROJETOS = [
   },
 ];
 
-/** Plugins presentes nos CINCO — sobem para global em vez de repetir 5×. */
-const GLOBAIS = ["correlation-id", "cors", "prometheus"];
+// NÃO existe lista de plugins globais aqui, e é de propósito. `correlation-id`,
+// `cors` e `prometheus` estão nos cinco projetos, mas com CONFIG DIFERENTE —
+// `cors` tem cinco listas de origens distintas. Global significaria escolher a
+// de um projeto e impor aos outros. Ver distribuirPlugins().
 
 const erros = [];
 
@@ -91,10 +107,15 @@ function prepararServices(yamlTexto, hosts, projetoId) {
 
   let rotas = 0;
   const paresHostCaminho = [];
+  // índices pelo nome ORIGINAL (sem prefixo): é assim que o bloco `plugins:` de
+  // topo referencia as rotas, e é depois de renomear que a referência quebraria
+  const porRota = new Map();
+  const porServico = new Map();
 
   for (const service of services.items) {
     // nome do SERVICE: prefixa, mas NÃO recebe hosts (host é de rota)
     const nomeSvc = service.get("name");
+    if (nomeSvc) porServico.set(String(nomeSvc), service);
     if (nomeSvc && !String(nomeSvc).startsWith(projetoId)) {
       service.set("name", `${projetoId}-${nomeSvc}`);
     }
@@ -104,6 +125,7 @@ function prepararServices(yamlTexto, hosts, projetoId) {
 
     for (const rota of routes.items) {
       const nome = rota.get("name");
+      if (nome) porRota.set(String(nome), rota);
       if (nome && !String(nome).startsWith(projetoId)) {
         rota.set("name", `${projetoId}-${nome}`);
       }
@@ -117,7 +139,101 @@ function prepararServices(yamlTexto, hosts, projetoId) {
       }
     }
   }
-  return { doc, services, rotas, paresHostCaminho };
+  return { doc, services, rotas, paresHostCaminho, porRota, porServico };
+}
+
+/**
+ * Copia um nó do YAML preservando os comentários.
+ *
+ * Importa: o `response-transformer` da central-ia carrega a explicação de por
+ * que usa `replace` e não `add` no `X-Frame-Options` (com `add` o plugin vira
+ * no-op silencioso, porque o upstream já manda o cabeçalho). Perder o
+ * comentário é perder o motivo — e alguém "simplifica" para `add` depois.
+ */
+function copiarNo(no) {
+  return parseDocument(String(new Document(no))).contents;
+}
+
+/**
+ * Reancora o bloco `plugins:` de topo dentro do projeto de origem.
+ *
+ * No Kong o plugin de topo pode ser escopado por `route:`/`service:`, ou não ter
+ * escopo nenhum — e aí vale para o gateway inteiro. Num Kong por projeto isso
+ * significa "todo o projeto"; num Kong único significa "todos os projetos", que
+ * é coisa bem diferente. O `cors` do live-flow aplicado ao Sigma seria uma
+ * política de origem trocada, sem erro nenhum no log.
+ *
+ * Então:
+ *   • `route: X`   → vira plugin aninhado na rota X (nome original, pré-prefixo)
+ *   • `service: X` → vira plugin aninhado no serviço X
+ *   • sem escopo   → vira plugin aninhado em CADA serviço do projeto
+ *
+ * A precedência do Kong (rota > serviço) preserva as sobrescritas: o
+ * cafe-mobile-erp tem `cors` do projeto E `cors` por rota, e a rota continua
+ * ganhando, como ganhava antes.
+ */
+function distribuirPlugins(doc, projetoId, porRota, porServico, erros) {
+  const topo = doc.get("plugins");
+  if (!topo?.items?.length) return 0;
+
+  const anexar = (alvo, pluginNo) => {
+    let lista = alvo.get("plugins");
+    if (!lista?.items) {
+      alvo.set("plugins", doc.createNode([]));
+      lista = alvo.get("plugins");
+    }
+    lista.items.push(pluginNo);
+  };
+
+  let anexados = 0;
+
+  for (const plugin of topo.items) {
+    const nome = String(plugin.get("name"));
+    const rotaRef = plugin.get("route");
+    const servicoRef = plugin.get("service");
+
+    if (plugin.get("consumer")) {
+      // nenhum projeto usa hoje; se passar a usar, o consumer é global no Kong e
+      // precisa de decisão própria — melhor reprovar do que anexar no lugar errado
+      erros.push(`${projetoId}: plugin "${nome}" escopado por consumer — não sei reancorar`);
+      continue;
+    }
+
+    let alvos = [];
+    if (rotaRef) {
+      const alvo = porRota.get(String(rotaRef));
+      if (!alvo) {
+        erros.push(`${projetoId}: plugin "${nome}" aponta para a rota "${rotaRef}", que não existe`);
+        continue;
+      }
+      alvos = [alvo];
+    } else if (servicoRef) {
+      const alvo = porServico.get(String(servicoRef));
+      if (!alvo) {
+        erros.push(`${projetoId}: plugin "${nome}" aponta para o service "${servicoRef}", que não existe`);
+        continue;
+      }
+      alvos = [alvo];
+    } else {
+      alvos = [...porServico.values()];
+      if (!alvos.length) {
+        erros.push(`${projetoId}: plugin "${nome}" é do projeto inteiro, mas o projeto não tem services`);
+        continue;
+      }
+    }
+
+    for (const alvo of alvos) {
+      const copia = copiarNo(plugin);
+      copia.delete("route");
+      copia.delete("service");
+      anexar(alvo, copia);
+      anexados++;
+    }
+  }
+
+  // o bloco de topo fica vazio: no Kong único, "sem escopo" nunca é o que se quer
+  doc.set("plugins", doc.createNode([]));
+  return anexados;
 }
 
 async function main() {
@@ -144,6 +260,16 @@ async function main() {
       erros.push(`${proj.id}: bloco services: vazio ou ilegível em ${proj.config}`);
       continue;
     }
+
+    // reancora o `plugins:` de topo ANTES de levar os services embora — depois
+    // disso o doc do projeto some e a referência não teria mais como ser lida
+    proj.plugins = distribuirPlugins(
+      preparado.doc,
+      proj.id,
+      preparado.porRota,
+      preparado.porServico,
+      erros
+    );
 
     proj.redes.forEach((r) => redes.add(r));
     proj.rotas = preparado.rotas;
@@ -181,20 +307,25 @@ services: []
 
  Cada rota carrega \`hosts:\` porque sete caminhos são disputados por dois ou
  três projetos (/, /admin, /api/webhooks…). Sem host, o Kong entrega a página
- do projeto errado SEM registrar erro. Ver docs/mapeamento.md.`;
-  saida.set(
-    "plugins",
-    GLOBAIS.map((name) => ({ name }))
-  );
+ do projeto errado SEM registrar erro. Ver docs/mapeamento.md.
+
+ \`plugins:\` de topo fica VAZIO de propósito. Todo plugin mora dentro do
+ serviço ou da rota do projeto que o declarou: os cinco configuram
+ \`cors\` de um jeito diferente, e um \`cors\` global sem \`origins\` libera \`*\`.`;
+  // topo vazio: nada é global. Ver distribuirPlugins() e conferir-plugins.mjs.
+  saida.set("plugins", saida.createNode([]));
   saida.get("services").items = todosServices;
 
   await mkdir("kong", { recursive: true });
   await writeFile(path.join("kong", "kong.yml"), String(saida));
 
   const totalRotas = PROJETOS.reduce((n, p) => n + (p.rotas ?? 0), 0);
+  const totalPlugins = PROJETOS.reduce((n, p) => n + (p.plugins ?? 0), 0);
   console.log(`✅ kong/kong.yml — ${PROJETOS.length} projetos, ${todosServices.length} services, ${totalRotas} rotas`);
   console.log(`   todas as rotas com hosts; nenhuma colisão host+caminho`);
+  console.log(`   ${totalPlugins} plugins de topo reancorados no projeto de origem (nenhum global)`);
   console.log(`   redes do container: ${[...redes].join(", ")}`);
+  console.log(`   → confira com: npm run conferir`);
 }
 
 main().catch((e) => {
