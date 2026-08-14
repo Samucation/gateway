@@ -265,12 +265,12 @@ async function trafego(minutos = 15, filtro = {}) {
     porStatus.set(status, (porStatus.get(status) ?? 0) + 1);
     porRota.set(caminho, (porRota.get(caminho) ?? 0) + 1);
 
-    const a = porApp.get(app) ?? { app, nome: NOME_DA_APP[app] ?? app, total: 0, bloqueadas: 0, erros: 0, bytes: 0, duracao: 0 };
+    const a = porApp.get(app) ?? { app, nome: NOME_DA_APP[app] ?? app, total: 0, bloqueadas: 0, erros: 0, bytes: 0, tempos: [] };
     a.total++;
     if (status === 429) a.bloqueadas++;
     if (status >= 500) a.erros++;
     a.bytes += Number(bytes) || 0;
-    a.duracao += Number(dur) || 0;
+    a.tempos.push(Number(dur) || 0);
     porApp.set(app, a);
 
     const minuto = quando.slice(0, 17);
@@ -296,8 +296,23 @@ async function trafego(minutos = 15, filtro = {}) {
       alertas.push({ nivel: "medio", ip: x.ip, apps: x.apps, texto: `${x.naoEncontradas} respostas 404 — varredura de caminho` });
   }
 
+  // MEDIANA, e não média.
+  //
+  // 🐞 A média me fez diagnosticar errado em 14/08/2026: a Central aparecia com
+  // "2699 ms" e eu reportei como aplicação lenta. Não era — o overlay do OBS
+  // mantém conexões SSE abertas por HORAS de propósito, e uma única linha de
+  // 846 s puxa a média de centenas de requisições de 5 ms para os segundos.
+  //
+  // A mediana ignora esses extremos: ela responde "quanto demora uma
+  // requisição típica", que é a pergunta que se está fazendo. O p95 fica ao
+  // lado para o caso oposto — quando a lentidão é real mas rara.
+  const percentil = (lista, p) => {
+    if (!lista.length) return 0;
+    const ord = [...lista].sort((x, y) => x - y);
+    return Math.round(ord[Math.min(ord.length - 1, Math.floor(ord.length * p))] * 1000);
+  };
   const apps = [...porApp.values()]
-    .map((a) => ({ ...a, mediaMs: a.total ? Math.round((a.duracao / a.total) * 1000) : 0 }))
+    .map(({ tempos, ...a }) => ({ ...a, medianaMs: percentil(tempos, 0.5), p95Ms: percentil(tempos, 0.95) }))
     .sort((a, b) => b.total - a.total);
 
   return {
@@ -616,7 +631,7 @@ async function vigiar() {
       janelaMin: t.minutos,
       total: t.total,
       bloqueadas: t.bloqueadas,
-      apps: t.apps.map((a) => ({ app: a.app, total: a.total, bloqueadas: a.bloqueadas, erros: a.erros, mediaMs: a.mediaMs })),
+      apps: t.apps.map((a) => ({ app: a.app, total: a.total, bloqueadas: a.bloqueadas, erros: a.erros, medianaMs: a.medianaMs, p95Ms: a.p95Ms })),
     });
 
     for (const [chave, quando] of jaAvisado) {

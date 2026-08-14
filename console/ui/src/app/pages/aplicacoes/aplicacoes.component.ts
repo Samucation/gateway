@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 
 interface AppTrafego {
   app: string; nome: string; total: number; bloqueadas: number;
-  erros: number; bytes: number; mediaMs: number;
+  erros: number; bytes: number; medianaMs: number; p95Ms: number;
 }
 interface Trafego { minutos: number; total: number; bloqueadas: number; apps: AppTrafego[]; alertas: unknown[]; }
 interface Amostra { quando: string; apps: { app: string; total: number; bloqueadas: number }[]; }
@@ -51,7 +51,7 @@ interface Estado { noAr: boolean; estado: string; saude: string; reinicios: stri
             <div><span class="n">{{ a.total }}</span><span class="l">requisições</span></div>
             <div><span class="n" [class.ruim]="a.bloqueadas > 0">{{ a.bloqueadas }}</span><span class="l">bloqueadas</span></div>
             <div><span class="n" [class.ruim]="a.erros > 0">{{ a.erros }}</span><span class="l">erros 5xx</span></div>
-            <div><span class="n" [class.lento]="a.mediaMs > 1000">{{ a.mediaMs }}<small>ms</small></span><span class="l">média</span></div>
+            <div><span class="n" [class.lento]="a.medianaMs > 500">{{ a.medianaMs }}<small>ms</small></span><span class="l">típica</span></div>
           </div>
 
           <!-- histórico curto: cada barra é uma amostra de 5 min gravada em disco,
@@ -63,7 +63,12 @@ interface Estado { noAr: boolean; estado: string; saude: string; reinicios: stri
             }
           </svg>
 
-          <a routerLink="/trafego" [queryParams]="{ app: a.app }" class="link-mini">ver acessos →</a>
+          <div class="rodape">
+            <!-- p95 ao lado da mediana: a mediana esconde lentidao rara, e foi
+                 justamente uma lentidao rara (4 s de DNS) que existia aqui -->
+            <span class="badge muted">p95 {{ a.p95Ms }} ms</span>
+            <a routerLink="/trafego" [queryParams]="{ app: a.app }" class="link-mini">ver acessos →</a>
+          </div>
         </div>
       }
     </div>
@@ -96,6 +101,7 @@ interface Estado { noAr: boolean; estado: string; saude: string; reinicios: stri
     .badge.ok { background: #123a26; color: #7ee2ac; }
     .tranquilo { background: #121a14; border-left: 3px solid #4caf7d; padding: .6rem .8rem; border-radius: 6px; margin-top: 1rem; }
     .link-mini { font-size: .75rem; opacity: .7; }
+    .rodape { display: flex; justify-content: space-between; align-items: center; margin-top: .2rem; }
   `],
 })
 export class AplicacoesComponent implements OnDestroy {
@@ -143,7 +149,8 @@ export class AplicacoesComponent implements OnDestroy {
         total: a?.total ?? 0,
         bloqueadas: a?.bloqueadas ?? 0,
         erros: a?.erros ?? 0,
-        mediaMs: a?.mediaMs ?? 0,
+        medianaMs: a?.medianaMs ?? 0,
+        p95Ms: a?.p95Ms ?? 0,
         barras: this.barrasDe(p.id),
       };
     }).sort((x, y) => y.total - x.total);

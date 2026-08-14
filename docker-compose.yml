@@ -79,6 +79,24 @@ services:
       # workers atendem de sobra e o consumo cai de ~2,2 GB para ~250 MB.
       KONG_NGINX_WORKER_PROCESSES: "2"
       KONG_MEM_CACHE_SIZE: "128m"
+
+      # ── 4 SEGUNDOS por requisição, e não era a aplicação ─────────────────
+      # O padrão do Kong é `LAST,SRV,A,CNAME`: ele pergunta por um registro SRV
+      # ANTES de perguntar o endereço. O DNS embutido do Docker simplesmente
+      # NÃO RESPONDE a SRV para nome de container — não devolve nem "não
+      # existe". O resolvedor do Kong espera 2 s, tenta de novo, espera mais
+      # 2 s, desiste e só então pergunta o A, que responde na hora.
+      #
+      # Medido em 14/08/2026, recriando o container para zerar o cache:
+      #   cafe-api        4,006 s  →  0,004 s
+      #   central.interno 4,031 s  →  0,011 s
+      #   urupix          0,009 s  (nunca sofreu: usa host.docker.internal,
+      #                             que é resolvido pelo /etc/hosts)
+      #
+      # Só a PRIMEIRA requisição depois de o cache expirar pagava, o que fazia
+      # parecer "a aplicação às vezes trava" — e mandava investigar o lugar
+      # errado. Era ~2% das requisições, sempre exatamente 4 s.
+      KONG_DNS_ORDER: "LAST,A,CNAME"
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     ports:
