@@ -147,6 +147,98 @@ async function estadoDoGateway() {
 }
 
 // ---------------------------------------------------------------------------
+// tráfego e abuso
+// ---------------------------------------------------------------------------
+
+/**
+ * Limites que separam "movimento" de "alguém tentando alguma coisa".
+ *
+ * São por JANELA (o padrão é 15 min), não por minuto: rajada curta é normal —
+ * uma página abre dezenas de pedidos de uma vez. O que denuncia abuso é o
+ * volume sustentado, ou a proporção de tentativas que dão errado.
+ */
+const SINAIS = {
+  requisicoesPorIp: 900, // ~1/s sustentado: acima disso não é gente navegando
+  bloqueiosPorIp: 20, // já bateu no teto muitas vezes e continua tentando
+  errosDeAutenticacao: 30, // 401/403 em série é varredura de credencial
+  naoEncontradosPorIp: 60, // 404 em série é varredura de caminho
+};
+
+const LINHA_DE_LOG =
+  /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) ([^" ]*)[^"]*" (\d{3}) (\d+|-)/;
+
+/**
+ * Lê o log de acesso do Kong.
+ *
+ * É a única fonte que tem o IP do cliente: as métricas do Prometheus agregam
+ * por rota e status e não sabem QUEM fez o pedido — servem para o gráfico, não
+ * para achar o abusador.
+ */
+async function trafego(minutos = 15) {
+  const { saida } = await rodar("docker", ["logs", CONTAINER, "--since", `${minutos}m`], { cwd: RAIZ });
+
+  const porIp = new Map();
+  const porStatus = new Map();
+  const porRota = new Map();
+  const porMinuto = new Map();
+  let total = 0;
+
+  for (const linha of saida.split("\n")) {
+    const m = LINHA_DE_LOG.exec(linha);
+    if (!m) continue;
+    const [, ip, quando, metodo, caminho, statusTexto] = m;
+    const status = Number(statusTexto);
+    total++;
+
+    const atual = porIp.get(ip) ?? { ip, total: 0, bloqueadas: 0, semAutorizacao: 0, naoEncontradas: 0, caminhos: new Set() };
+    atual.total++;
+    if (status === 429) atual.bloqueadas++;
+    if (status === 401 || status === 403) atual.semAutorizacao++;
+    if (status === 404) atual.naoEncontradas++;
+    if (atual.caminhos.size < 12) atual.caminhos.add(`${metodo} ${caminho}`);
+    porIp.set(ip, atual);
+
+    porStatus.set(status, (porStatus.get(status) ?? 0) + 1);
+    porRota.set(caminho, (porRota.get(caminho) ?? 0) + 1);
+
+    // "14/Aug/2026:16:46:59 +0000" → agrupa por minuto para o gráfico
+    const minuto = quando.slice(0, 17);
+    const balde = porMinuto.get(minuto) ?? { minuto, total: 0, bloqueadas: 0 };
+    balde.total++;
+    if (status === 429) balde.bloqueadas++;
+    porMinuto.set(minuto, balde);
+  }
+
+  const ips = [...porIp.values()]
+    .map((x) => ({ ...x, caminhos: [...x.caminhos] }))
+    .sort((a, b) => b.total - a.total);
+
+  const alertas = [];
+  for (const x of ips) {
+    if (x.total >= SINAIS.requisicoesPorIp)
+      alertas.push({ nivel: "alto", ip: x.ip, texto: `${x.total} requisições em ${minutos} min` });
+    if (x.bloqueadas >= SINAIS.bloqueiosPorIp)
+      alertas.push({ nivel: "alto", ip: x.ip, texto: `levou ${x.bloqueadas} bloqueios (429) e continuou` });
+    if (x.semAutorizacao >= SINAIS.errosDeAutenticacao)
+      alertas.push({ nivel: "alto", ip: x.ip, texto: `${x.semAutorizacao} respostas 401/403 — varredura de credencial` });
+    if (x.naoEncontradas >= SINAIS.naoEncontradosPorIp)
+      alertas.push({ nivel: "medio", ip: x.ip, texto: `${x.naoEncontradas} respostas 404 — varredura de caminho` });
+  }
+
+  return {
+    minutos,
+    total,
+    bloqueadas: porStatus.get(429) ?? 0,
+    serie: [...porMinuto.values()].sort((a, b) => a.minuto.localeCompare(b.minuto)),
+    ips: ips.slice(0, 25),
+    porStatus: Object.fromEntries([...porStatus.entries()].sort((a, b) => b[1] - a[1])),
+    porRota: Object.fromEntries([...porRota.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)),
+    alertas,
+    sinais: SINAIS,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // aplicar — a transação
 // ---------------------------------------------------------------------------
 
@@ -309,6 +401,11 @@ const servidor = createServer(async (req, res) => {
   try {
     if (rota === "/api/estado") return json(res, 200, await estadoDoGateway());
 
+    if (rota === "/api/trafego") {
+      const minutos = Math.min(180, Math.max(1, Number(url.searchParams.get("minutos") ?? 15)));
+      return json(res, 200, await trafego(minutos));
+    }
+
     if (rota === "/api/projetos") {
       return json(res, 200, await Promise.all(PROJETOS.map(resumoDoProjeto)));
     }
@@ -384,6 +481,69 @@ const servidor = createServer(async (req, res) => {
     return json(res, 500, { erro: String(e.message ?? e) });
   }
 });
+
+// ---------------------------------------------------------------------------
+// vigia — avisa mesmo com o console fechado
+// ---------------------------------------------------------------------------
+//
+// O painel só alerta quem está olhando para ele, e ataque não escolhe hora. O
+// vigia relê a janela sozinho e manda o que for novo para um webhook.
+//
+// O canal é uma URL em `GATEWAY_ALERTA_WEBHOOK` de propósito: Telegram, Discord,
+// Slack e n8n aceitam POST com JSON, então o console não precisa saber de token
+// de nenhum deles nem guardar segredo de outro projeto.
+//
+//     GATEWAY_ALERTA_WEBHOOK=https://... npm run console
+
+const WEBHOOK = process.env.GATEWAY_ALERTA_WEBHOOK ?? "";
+const INTERVALO_VIGIA_MS = 5 * 60 * 1000;
+
+// 🐞 Sem esta memória o vigia repetiria o MESMO alerta a cada cinco minutos
+// enquanto o ataque durasse — e aviso que repete demais é aviso que se aprende
+// a ignorar, que é pior do que não avisar.
+const jaAvisado = new Map();
+const LEMBRAR_MS = 60 * 60 * 1000;
+
+async function vigiar() {
+  try {
+    const t = await trafego(15);
+    const agora = Date.now();
+
+    for (const [chave, quando] of jaAvisado) {
+      if (agora - quando > LEMBRAR_MS) jaAvisado.delete(chave);
+    }
+
+    const novos = t.alertas.filter((a) => {
+      const chave = `${a.ip}|${a.texto.replace(/\d+/g, "#")}`;
+      if (jaAvisado.has(chave)) return false;
+      jaAvisado.set(chave, agora);
+      return true;
+    });
+    if (!novos.length) return;
+
+    for (const a of novos) {
+      console.log(`[alerta ${a.nivel}] ${a.ip} — ${a.texto}`);
+    }
+    if (!WEBHOOK) return;
+
+    const texto =
+      `⚠️ Gateway — ${novos.length} sinal(is) de abuso nos últimos 15 min:\n` +
+      novos.map((a) => `• ${a.ip}: ${a.texto}`).join("\n");
+    await fetch(WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // `text` e `content` juntos: Slack/n8n leem o primeiro, Discord o segundo.
+      // Mandar os dois evita um adaptador por serviço.
+      body: JSON.stringify({ text: texto, content: texto, alertas: novos }),
+      signal: AbortSignal.timeout(10000),
+    }).catch((e) => console.log("falha ao avisar o webhook: " + e.message));
+  } catch (e) {
+    console.log("vigia falhou nesta rodada: " + (e.message ?? e));
+  }
+}
+
+setInterval(vigiar, INTERVALO_VIGIA_MS);
+setTimeout(vigiar, 20000);
 
 // ⚠️ 127.0.0.1 e não 0.0.0.0. Este serviço edita a configuração do gateway de
 // TODOS os projetos e roda comandos docker — quem o alcança manda no ambiente

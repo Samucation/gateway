@@ -20,6 +20,12 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/projetos/projetos.component').then(m => m.ProjetosComponent),
       },
 
+      // Tráfego e abuso — lido do log de acesso do gateway.
+      {
+        path: 'trafego',
+        loadComponent: () => import('./pages/trafego/trafego.component').then(m => m.TrafegoComponent),
+      },
+
       // O dashboard e os alertas da base original eram do sigma-payments
       // (Prometheus, health do app, catálogo de apps). Aqui o que interessa é o
       // estado do gateway, que a própria tela de Projetos já mostra.

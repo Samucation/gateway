@@ -4,3 +4,5 @@ node_modules/
 console/ui/node_modules/
 console/ui/dist/
 console/ui/.angular/
+.tmp-console.log
+.tmp-console.err

@@ -29,6 +29,9 @@ import { CommonModule } from '@angular/common';
           <div class="nav-group">Configuracao</div>
           <a routerLink="/projetos" routerLinkActive="active">Projetos (editar)</a>
 
+          <div class="nav-group">Vigilancia</div>
+          <a routerLink="/trafego" routerLinkActive="active">Trafego e ataques</a>
+
           <div class="nav-group">No ar agora</div>
           <a routerLink="/kong/services"  routerLinkActive="active">Services</a>
           <a routerLink="/kong/routes"    routerLinkActive="active">Routes</a>

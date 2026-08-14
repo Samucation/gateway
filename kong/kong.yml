@@ -139,6 +139,15 @@ services:
                     www.urupix.com.br,
                     urupix.cursodetecnologia.dev.br,
                     urupix.interno
+                  ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config:
+                          # folgado: monitoramento legítimo bate aqui de minuto em minuto
+                          { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
                   ]
               },
 
@@ -210,6 +219,16 @@ services:
                     www.urupix.com.br,
                     urupix.cursodetecnologia.dev.br,
                     urupix.interno
+                  ],
+                plugins:
+                  [
+                    {
+                        # As duas rotas públicas de pagamentos estavam SEM teto. `/api/payments/docs`
+                      # tem o botão de experimentar, onde se cola credencial de verdade; e o
+                      # `/health` é o alvo preferido de varredura porque responde barato e sempre.
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
                   ]
               },
 
@@ -918,7 +937,21 @@ services:
                 paths: [ /v1/marketing ],
                 strip_path: false,
                 methods: [ GET, POST, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # ⚠️ Faltava limite AQUI, na rota mais sensível do produto: `/v1/marketing`
+                      # exporta a base inteira em CSV e apaga cadastro por LGPD. Sem teto, uma
+                      # credencial vazada esvazia a base numa tarde — e o log mostraria só chamadas
+                      # autenticadas, todas "legítimas".
+                      #
+                      # 60/min é folgado para uma pessoa operando e apertado para varredura. O teto
+                      # por HORA existe para o ataque lento, que respeita o limite por minuto.
+                        name: rate-limiting,
+                        config: { minute: 60, hour: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
+                  ]
               },
 
             # O repasse do nosso próprio bot. Rota separada porque ele é chamado
@@ -1041,7 +1074,16 @@ services:
                 paths: [ /, /inicio, /portal ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ]
+                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                plugins:
+                  [
+                    {
+                        # As telas públicas do site. Ficaram sem teto quando `/painel` saiu daqui para
+                      # rota própria — e são a maior superfície pública do projeto.
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                      }
+                  ]
               },
 
             # O painel do OPERADOR, separado do resto do site.
