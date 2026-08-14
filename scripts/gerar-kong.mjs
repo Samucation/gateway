@@ -56,6 +56,13 @@ const PROJETOS = [
     id: "sigmafin",
     config: "sigma-financeiro/deploy/kong/kong.yml",
     hosts: ["sigma-financeiro.cursodetecnologia.dev.br"],
+    // `/api/cron` dispara o dreno do outbox — é gatilho de trabalho, não rota
+    // de produto, e já era restrita a faixa privada. Quem a chama de verdade é
+    // o `deploy/windows/cron.ps1`, que fala com a aplicação direto na 3200 e
+    // nem passa por aqui. Fechá-la no domínio público não tira função de
+    // ninguém e tira uma superfície de ataque de dentro do fluxo de dinheiro.
+    rotasInternas: ["cron"],
+    hostInterno: "sigma.interno",
     redes: ["sigma-financeiro_default"],
   },
   {

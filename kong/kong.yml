@@ -480,7 +480,7 @@ services:
                         config: { allow: [ "127.0.0.1", "::1", "172.16.0.0/12", "192.168.0.0/16" ] }
                       }
                   ],
-                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+                hosts: [ sigma.interno ]
               },
 
             # ==================================================================
@@ -553,6 +553,17 @@ services:
                       }
                   ],
                 hosts: [ sigma-financeiro.cursodetecnologia.dev.br ]
+              },
+            {
+                name: sigmafin-cron-bloqueio-publico,
+                hosts: [ sigma-financeiro.cursodetecnologia.dev.br ],
+                paths: [ /api/cron ],
+                strip_path: false,
+                methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
+                plugins:
+                  [
+                    { name: request-termination, config: { status_code: 404, message: Not Found } }
+                  ]
               }
           ],
         plugins:

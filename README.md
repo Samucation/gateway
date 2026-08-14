@@ -17,7 +17,8 @@ workers cada e rodam sem teto.
 | Compose do Kong único | ✅ porta **8050**, ao lado dos atuais |
 | Subir o Kong único | ✅ `gateway-kong` na 8050, healthy |
 | Comparar rota a rota | ✅ live-flow, sigma-financeiro e cafe-mobile-erp batem com o antigo |
-| Conferir plugin a plugin | ✅ `npm run conferir` — 44 rotas, plugin efetivo idêntico |
+| Conferir plugin a plugin | ✅ `npm run conferir` — 45 rotas, plugin efetivo idêntico |
+| Conferir defesas de ambiente | ✅ `npm run ambiente` — 13 variáveis, contra o container RODANDO |
 | Frontend de operação | ⏳ vem do `sigma-payments-ops-ui` |
 | Cortar os Kongs locais | 🔄 2 de 4 (`central-ia`, `cafe-mobile-erp`) |
 
@@ -113,13 +114,45 @@ mesmo caminho pareceriam idênticos olhando só o status.
 
 1. ~~`central-ia`~~ ✅ **CORTADO em 14/08/2026** — `central-kong` removido
 2. ~~`cafe-mobile-erp`~~ ✅ **CORTADO em 14/08/2026** — `plataforma-kong` removido
-3. `sigma-financeiro` — 2,20 GB
-4. `live-flow` — **por último**: é o que tem live em produção. 2,23 GB
+3. ~~`sigma-financeiro`~~ ✅ **CORTADO em 14/08/2026** — `sigma-kong` removido (2,3 GB)
+4. `live-flow` — **por último**: é o que tem live em produção. 2,34 GB
 
-Os dois que faltam são **4,4 GB** — o ganho de verdade está neles. Os dois já
-cortados eram os pequenos, de propósito: serviram para achar os erros de
-procedimento (o consumidor escondido, os plugins descartados) num lugar onde
-errar não derruba live.
+**3 de 4 cortados. 2,3 GB já liberados.** Cada corte pequeno serviu para achar
+um erro de procedimento antes de chegar no que tem live: o consumidor escondido
+(central-ia), os plugins descartados (cafe-mobile-erp) e o watchdog que
+ressuscita o container (sigma-financeiro).
+
+### ⚠️ O watchdog desfaz a migração sozinho
+
+O `sigma-financeiro/deploy/windows/watchdog.ps1` vigiava `127.0.0.1:8010` e,
+ao ver a porta morta, rodava `docker rm -f sigma-kong` seguido de
+`docker compose up -d kong`. Ele **recriaria o Kong removido em minutos**, de
+minuto em minuto, e nada no resultado denunciaria isso — o container voltaria
+com o mesmo nome e a mesma config.
+
+Todo projeto com watchdog precisa ser apontado para o gateway **antes** do
+`docker rm`. E o conserto ficou condicionado a `-not $publicoOk`: o gateway é
+**compartilhado**, e recriá-lo por uma falha local derruba os cinco projetos
+por um problema de um.
+
+O `live-flow` tem watchdog igual — conferir antes do corte 4.
+
+### Como o corte 3 foi provado
+
+| | |
+|---|---|
+| 10 rotas, status e corpo | idênticos byte a byte¹ |
+| 6 cabeçalhos de segurança em `/`, `/admin`, `/portal` | iguais nos dois |
+| `npm run seguranca` | plugin efetivo + ambiente ✅ |
+| Kong antigo **pausado** | domínio seguiu em 200 |
+
+¹ depois de normalizar o nonce da CSP, que muda a cada requisição por desenho e
+aparece em **três** formas: no header, no atributo HTML e escapado dentro do
+payload RSC. Normalizar só as duas primeiras ainda acusava diferença — e
+parar aí teria deixado a dúvida de pé.
+
+Pausar o Kong antigo antes de removê-lo é o teste que vale: responder 200 com
+ele no ar não prova nada sobre quem está atendendo.
 
 ### ⚠️ O corte NÃO é só remover o container
 
