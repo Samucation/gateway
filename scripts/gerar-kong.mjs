@@ -49,7 +49,17 @@ const PROJETOS = [
   {
     id: "liveflow",
     config: "live-flow/deploy/kong/kong.yml",
-    hosts: ["urupix.com.br", "www.urupix.com.br", "urupix.cursodetecnologia.dev.br"],
+    // `urupix.interno` (→ 127.0.0.1 no hosts do Windows) existe para as
+    // checagens LOCAIS: o watchdog do túnel precisa testar a ORIGEM e o
+    // PÚBLICO do mesmo caminho, e a origem só é alcançável com um Host que o
+    // gateway saiba rotear. Sem ele a checagem cairia em 404 e o watchdog
+    // concluiria que o Urupix está fora — para sempre.
+    hosts: [
+      "urupix.com.br",
+      "www.urupix.com.br",
+      "urupix.cursodetecnologia.dev.br",
+      "urupix.interno",
+    ],
     redes: ["live-flow_default"],
   },
   {

@@ -40,7 +40,13 @@ services:
                         config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               }
           ],
         plugins:
@@ -111,7 +117,13 @@ services:
                         config: { minute: 6000, policy: local, fault_tolerant: true }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- Health (público; sonda de LB/gateway) ---
@@ -121,7 +133,13 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 methods: [ GET ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- OAuth token (público; rate-limit por IP anti-força-bruta) ---
@@ -138,7 +156,13 @@ services:
                         config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- API pública de pagamentos (o app ainda checa auth+escopo+limite por app) ---
@@ -162,7 +186,13 @@ services:
                           }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- Docs/Swagger: em prod, idealmente restringir ou mover p/ subdomínio
@@ -174,7 +204,13 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 methods: [ GET ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- Admin: autorização é do APP (allowlist dura + 2FA + break-glass). Na
@@ -191,7 +227,13 @@ services:
                   [
                     { name: rate-limiting, config: { minute: 120, policy: local, limit_by: ip } }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # ===================================================================
@@ -226,7 +268,13 @@ services:
                         config: { minute: 6000, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # PÁGINA DE DOAÇÃO (/d/slug) — o coração do negócio: é onde o FÃ entra.
@@ -243,7 +291,13 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # API interna do Urupix (criar doação, status, painel…) — onde mora o
@@ -260,7 +314,13 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # PAINEL DO STREAMER (uso logado, consultas mais pesadas: relatórios,
@@ -277,7 +337,13 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # OVERLAYS do OBS (páginas do browser source; o STREAM fica no serviço
@@ -294,7 +360,13 @@ services:
                         config: { minute: 2400, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # AUTENTICAÇÃO (login, 2FA, callbacks) — limite mais apertado: é alvo
@@ -311,7 +383,13 @@ services:
                         config: { minute: 300, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # PORTAL DO DESENVOLVEDOR
@@ -327,7 +405,13 @@ services:
                         config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               },
 
             # --- Resto (landing, termos, páginas soltas) ---
@@ -343,7 +427,13 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ urupix.com.br, www.urupix.com.br, urupix.cursodetecnologia.dev.br ]
+                hosts:
+                  [
+                    urupix.com.br,
+                    www.urupix.com.br,
+                    urupix.cursodetecnologia.dev.br,
+                    urupix.interno
+                  ]
               }
           ],
         plugins:
