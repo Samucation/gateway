@@ -33,9 +33,12 @@ services:
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     ports:
-      - "8040:8000"              # proxy (vira 8000 no fim da migração)
-      - "127.0.0.1:8041:8001"    # admin — SÓ loopback do host
-      - "127.0.0.1:8140:8100"    # status/health
+      # 8050, e não 8040: a 8040 já é do `central-voz-whisper`. Conferir porta
+      # livre antes de escolher — o compose falha no `up` com "port is already
+      # allocated" e o container fica em Created, parecendo outra coisa.
+      - "8050:8000"              # proxy (vira 8000 no fim da migração)
+      - "127.0.0.1:8051:8001"    # admin — SÓ loopback do host
+      - "127.0.0.1:8150:8100"    # status/health
     extra_hosts:
       # live-flow e sigma-financeiro rodam na MÁQUINA, não em container.
       # Sem isto o Kong não os alcança e devolve 503 com o app de pé — foi o

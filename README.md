@@ -14,12 +14,13 @@ workers cada e rodam sem teto.
 | Mapear os 5 Kongs | ✅ [`docs/mapeamento.md`](docs/mapeamento.md) |
 | Gerador da config unificada | ✅ `scripts/gerar-kong.mjs` |
 | Config unificada (12 services, 44 rotas) | ✅ `kong/kong.yml` — `kong config parse` aprova |
-| Compose do Kong único | ✅ porta **8040**, ao lado dos atuais |
-| Subir e comparar rota a rota | ⏳ |
+| Compose do Kong único | ✅ porta **8050**, ao lado dos atuais |
+| Subir o Kong único | ✅ `gateway-kong` na 8050, healthy |
+| Comparar rota a rota | ✅ live-flow, sigma-financeiro e cafe-mobile-erp batem com o antigo |
 | Frontend de operação | ⏳ vem do `sigma-payments-ops-ui` |
 | Cortar os Kongs locais | ⏳ um por vez, no fim |
 
-**Nada foi desligado.** O Kong novo nasce na 8040 para conviver com os antigos;
+**Nada foi desligado.** O Kong novo nasce na 8050 para conviver com os antigos;
 só assume a 8000 quando cada rota estiver provada.
 
 ## O achado que definiu o desenho
@@ -56,10 +57,28 @@ gerado — editar à mão faz a mudança sumir na próxima geração.
 | | |
 |---|---|
 | 5 Kongs hoje | 4,75 GB |
-| 1 Kong com `KONG_NGINX_WORKER_PROCESSES=2` e `mem_limit: 512m` | ~250 MB |
+| 1 Kong servindo os 5 (**medido**) | **191 MB** |
+
+Medido com o gateway no ar: `gateway-kong` 191,6 MiB contra `liveflow-kong`
+2,16 GiB e `sigma-kong` 2,15 GiB — cada um servindo UM projeto.
 
 Os 32 workers por Kong são o padrão (um por núcleo). Para 5 apps domésticos,
 2 workers atendem de sobra.
+
+## Provado até aqui
+
+Com o Kong novo no ar, o mesmo `/` entrega apps diferentes conforme o host —
+que é a prova de que a separação funciona:
+
+| Host | Entrega |
+|---|---|
+| `urupix.com.br` | *Urupix — receba PIX na tela da sua live* |
+| `sigma-financeiro.cursodetecnologia.dev.br` | *Sigma Financeiro* |
+| `cafe-api.cursodetecnologia.dev.br` | *Plataforma de Atendimento* |
+| host desconhecido | **404** — não cai em ninguém |
+
+Conferido pelo `<title>`, não pelo código HTTP: três apps respondendo 200 no
+mesmo caminho pareceriam idênticos olhando só o status.
 
 ## Ordem do corte (do menor risco para o maior)
 
@@ -68,7 +87,7 @@ Os 32 workers por Kong são o padrão (um por núcleo). Para 5 apps domésticos,
 3. `sigma-financeiro`
 4. `live-flow` — **por último**: é o que tem live em produção
 
-Cada corte: apontar o túnel para a 8040 → conferir → remover o Kong local.
+Cada corte: apontar o túnel para a 8050 → conferir → remover o Kong local.
 Reverter é reapontar o túnel de volta.
 
 ## Frontend
