@@ -293,6 +293,36 @@ preservando o encoding e **validar antes de reiniciar**:
 cloudflared --config <caminho> tunnel ingress validate   # a flag vem ANTES do subcomando
 ```
 
+## API para os outros projetos lerem os próprios dados
+
+O console é a interface de quem **opera** o gateway. Esta API é outra coisa: o
+gateway devolvendo, por HTTP, o que ele sabe sobre **cada aplicação** — para o
+admin do Urupix, o do Sigma ou qualquer projeto futuro mostrar os próprios
+acessos e incidentes sem reimplementar coleta.
+
+```bash
+GATEWAY_API_CHAVES=chave-do-urupix:liveflow,chave-do-cafe:plataforma
+```
+
+```
+GET /api/publico/trafego?minutos=60     → série, status, rotas, IPs, alertas
+GET /api/publico/incidentes?dias=7      → histórico de abuso
+Authorization: Bearer <chave>
+```
+
+**Agnóstico por contrato.** Não existe rota "do Urupix" — existe uma chave por
+projeto. O gateway atende cinco e vai atender mais; um endpoint com nome de
+cliente dentro viraria cinco endpoints quase iguais, e o quinto esqueceria
+alguma proteção.
+
+⚠️ **O `app` vem da CHAVE, nunca do pedido.** Testado: a chave do
+cafe-mobile-erp pedindo `?app=liveflow` recebe os dados dela mesma. Ler o
+parâmetro seria deixar o cliente escolher de quem quer ver o tráfego — e o
+tráfego do Sigma é dinheiro.
+
+Os IPs vão **sem os caminhos**: o consumidor precisa saber quem abusou, não
+reconstruir a navegação de cada visitante.
+
 ## Aviso de ataque no celular
 
 O vigia detecta abuso e grava em `console/dados/incidentes.jsonl`, mas só isso

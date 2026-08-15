@@ -472,6 +472,27 @@ async function aplicar() {
 // http
 // ---------------------------------------------------------------------------
 
+/**
+ * Qual aplicação a credencial pode ver.
+ *
+ * Uma chave por projeto, e cada uma enxerga só a sua. O formato é
+ * `chave:app,chave:app` — feio de ler e simples de operar, que é o certo para
+ * algo que vive numa variável de ambiente.
+ *
+ * Comparação em tempo constante seria melhor; aqui a superfície é loopback e a
+ * chave não protege dinheiro, então não vale a complexidade. Se um dia o
+ * console sair do loopback, isto muda JUNTO com a decisão de expor.
+ */
+function appDaChave(cabecalho) {
+  const chave = /^Bearer\s+(.+)$/i.exec(cabecalho ?? "")?.[1]?.trim();
+  if (!chave) return null;
+  for (const par of (process.env.GATEWAY_API_CHAVES ?? "").split(",")) {
+    const [k, app] = par.split(":").map((x) => x?.trim());
+    if (k && app && k === chave) return app;
+  }
+  return null;
+}
+
 const json = (res, cod, corpo) => {
   res.writeHead(cod, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(corpo));
@@ -489,6 +510,65 @@ const servidor = createServer(async (req, res) => {
 
   try {
     if (rota === "/api/estado") return json(res, 200, await estadoDoGateway());
+
+    // ── API PÚBLICA (para os OUTROS projetos) ────────────────────────────
+    //
+    // O console é a interface de quem OPERA o gateway. Isto aqui é outra
+    // coisa: é o gateway devolvendo, por API, o que ele sabe sobre CADA
+    // aplicação — para que o admin do Urupix, o do Sigma ou qualquer projeto
+    // futuro mostre os próprios acessos e incidentes sem reimplementar coleta.
+    //
+    // ⚠️ AGNÓSTICO POR CONTRATO. Não existe rota "do Urupix": existe `?app=`.
+    // O gateway atende cinco projetos e vai atender mais; um endpoint com nome
+    // de cliente dentro viraria cinco endpoints quase iguais, e o quinto
+    // esqueceria alguma proteção.
+    //
+    // Cada chave enxerga UMA aplicação, e o `app` do pedido é ignorado se não
+    // for a dela. Sem isso, a chave do cafe-mobile-erp leria o tráfego do
+    // Sigma — que é dinheiro — só trocando um parâmetro na URL.
+    //
+    //   GATEWAY_API_CHAVES=chave1:liveflow,chave2:sigmafin
+    if (rota.startsWith("/api/publico/")) {
+      const dono = appDaChave(req.headers.authorization);
+      if (!dono) {
+        return json(res, 401, {
+          erro: "Envie a credencial em Authorization: Bearer <chave>.",
+        });
+      }
+
+      if (rota === "/api/publico/trafego") {
+        const minutos = Math.min(180, Math.max(1, Number(url.searchParams.get("minutos") ?? 60)));
+        // o `app` NÃO vem do pedido: vem da chave. Ler o parâmetro aqui seria
+        // deixar o cliente escolher de quem ele quer ver o tráfego.
+        const t = await trafego(minutos, { app: dono });
+        return json(res, 200, {
+          app: dono,
+          minutos: t.minutos,
+          total: t.total,
+          bloqueadas: t.bloqueadas,
+          serie: t.serie,
+          porStatus: t.porStatus,
+          porRota: t.porRota,
+          // os IPs vão SEM os caminhos: o consumidor precisa saber quem abusou,
+          // não reconstruir a navegação de cada visitante do vizinho
+          ips: t.ips.map(({ ip, total, bloqueadas, semAutorizacao, naoEncontradas }) => ({
+            ip, total, bloqueadas, semAutorizacao, naoEncontradas,
+          })),
+          alertas: t.alertas,
+        });
+      }
+
+      if (rota === "/api/publico/incidentes") {
+        const dias = Math.min(90, Math.max(1, Number(url.searchParams.get("dias") ?? 7)));
+        const corte = Date.now() - dias * 86400000;
+        const lista = (await lerJsonl(ARQ_INCIDENTES))
+          .filter((i) => Date.parse(i.quando) >= corte)
+          .filter((i) => (i.apps ?? []).includes(dono));
+        return json(res, 200, { app: dono, total: lista.length, incidentes: lista.reverse().slice(0, 500) });
+      }
+
+      return json(res, 404, { erro: "rota desconhecida" });
+    }
 
     if (rota === "/api/trafego") {
       const minutos = Math.min(180, Math.max(1, Number(url.searchParams.get("minutos") ?? 15)));
