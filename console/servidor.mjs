@@ -613,56 +613,69 @@ const servidor = createServer(async (req, res) => {
 const WEBHOOK = process.env.GATEWAY_ALERTA_WEBHOOK ?? "";
 const INTERVALO_VIGIA_MS = 5 * 60 * 1000;
 
-// ── TELEGRAM ────────────────────────────────────────────────────────────────
+// ── AVISO PELA PLATAFORMA DE MENSAGERIA ─────────────────────────────────────
 //
-// O webhook genérico acima serve Discord, Slack e n8n, mas NÃO o Telegram: lá a
-// mensagem precisa do `chat_id` no corpo, e o endereço carrega o token. Por isso
-// o Telegram tem caminho próprio em vez de virar mais uma URL.
+// 🐞 A primeira versão falava com a API do Telegram DIRETO daqui. Funcionava, e
+// estava errada de arquitetura: a casa já tem uma plataforma de mensageria
+// multi-inquilino (o `cafe-mobile-erp`), cuja própria documentação diz "o Café
+// ERP é só mais um tenant". Ter um segundo caminho para mandar mensagem
+// significa dois lugares guardando token de bot, dois lugares para consertar
+// quando o Telegram mudar, e nenhum dos dois com idempotência.
 //
-// É o canal certo para ataque, e a razão é simples: chega no celular. Um e-mail
-// às 3 da manhã é lido às 9.
+// Agora o gateway é um TENANT como qualquer outro:
 //
-//   GATEWAY_TELEGRAM_TOKEN=123456:ABC...   (o token do bot, pelo @BotFather)
-//   GATEWAY_TELEGRAM_CHAT=987654321        (para QUEM mandar)
+//     POST /v1/messaging/messages
+//       ApiKeyMiddleware → RateLimiter → SendMessage → TelegramChannel
 //
-// ⚠️ O `chat_id` não é o nome de usuário: o bot só escreve para quem JÁ falou
-// com ele — é regra do Telegram, contra bot que persegue gente. Mande "/start"
-// ao bot e pegue o id em https://api.telegram.org/bot<TOKEN>/getUpdates.
-const TG_TOKEN = process.env.GATEWAY_TELEGRAM_TOKEN ?? "";
-const TG_CHAT = process.env.GATEWAY_TELEGRAM_CHAT ?? "";
+// O que se ganha de graça por não reimplementar: chave de bot num lugar só,
+// limite por tenant, idempotência (o mesmo alerta não vira duas mensagens), e
+// canal novo — WhatsApp hoje, web amanhã — sem tocar aqui.
+//
+//   GATEWAY_MSG_URL=http://cafe.interno:8050   (a plataforma, pelo gateway)
+//   GATEWAY_MSG_CHAVE=<api key do tenant "gateway">
+//   GATEWAY_MSG_PARA=<chat id do Telegram, ou telefone com DDI>
+//   GATEWAY_MSG_CANAL=telegram                 (ou whatsapp)
+//
+// ⚠️ O destinatário do Telegram é o `chat id`, não o nome de usuário — e o bot
+// só escreve para quem JÁ falou com ele. Mande "/start" ao bot antes.
+const MSG_URL = process.env.GATEWAY_MSG_URL ?? "http://cafe.interno:8050";
+const MSG_CHAVE = process.env.GATEWAY_MSG_CHAVE ?? "";
+const MSG_PARA = process.env.GATEWAY_MSG_PARA ?? "";
+const MSG_CANAL = process.env.GATEWAY_MSG_CANAL ?? "telegram";
 
-async function avisarTelegram(texto) {
-  if (!TG_TOKEN || !TG_CHAT) return false;
+async function avisarPelaPlataforma(texto, chaveDoAlerta) {
+  if (!MSG_CHAVE || !MSG_PARA) return false;
   try {
-    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    const r = await fetch(`${MSG_URL}/v1/messaging/messages`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${MSG_CHAVE}`,
+        // a plataforma dedupe por esta chave: se o vigia repetir a rodada por
+        // qualquer motivo, o dono não recebe a mesma mensagem duas vezes
+        "Idempotency-Key": chaveDoAlerta,
+      },
       body: JSON.stringify({
-        chat_id: TG_CHAT,
-        text: texto,
-        // sem `parse_mode`: um IP com `_` ou `*` viraria markdown quebrado e o
-        // Telegram RECUSA a mensagem inteira — o aviso sumiria justo no ataque
-        disable_web_page_preview: true,
+        to: MSG_PARA,
+        channel_type: MSG_CANAL,
+        content: { type: "text", text: texto },
       }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!r.ok) {
       const erro = await r.text().catch(() => "");
-      console.log(`[alerta] Telegram recusou (${r.status}): ${erro.slice(0, 200)}`);
+      console.log(`[alerta] a plataforma recusou (${r.status}): ${erro.slice(0, 200)}`);
       return false;
     }
     return true;
   } catch (e) {
-    console.log("[alerta] falha ao falar com o Telegram: " + (e.message ?? e));
+    // ⚠️ A plataforma é alcançada PELO gateway (cafe.interno). Se o gateway
+    // estiver fora, o aviso não sai — mas aí quem avisa são os watchdogs, que
+    // não dependem deste caminho.
+    console.log("[alerta] falha ao falar com a plataforma: " + (e.message ?? e));
     return false;
   }
 }
-
-// 🐞 Sem esta memória o vigia repetiria o MESMO alerta a cada cinco minutos
-// enquanto o ataque durasse — e aviso que repete demais é aviso que se aprende
-// a ignorar, que é pior do que não avisar.
-const jaAvisado = new Map();
-const LEMBRAR_MS = 60 * 60 * 1000;
 
 async function vigiar() {
   try {
@@ -701,7 +714,10 @@ async function vigiar() {
 
     // Telegram primeiro: é o que chega no celular. Os dois podem estar ligados
     // ao mesmo tempo — quem quiser o alerta no Discord E no bolso, tem.
-    const foiTelegram = await avisarTelegram(texto);
+    // chave estavel por alerta: a plataforma dedupe por ela, entao a mesma
+    // rodada repetida nao vira duas mensagens no celular do dono
+    const chave = "gw-" + digest(novos.map((a) => a.ip + a.texto).join("|"));
+    const foiTelegram = await avisarPelaPlataforma(texto, chave);
 
     if (WEBHOOK) {
       await fetch(WEBHOOK, {
@@ -717,8 +733,8 @@ async function vigiar() {
       // silêncio: senão o vigia parece funcionando enquanto ninguém é avisado —
       // que é o pior desfecho possível para um alerta de ataque.
       console.log(
-        "[alerta] nenhum canal configurado (GATEWAY_TELEGRAM_TOKEN/CHAT ou " +
-          "GATEWAY_ALERTA_WEBHOOK) — o incidente ficou só no arquivo."
+        "[alerta] nenhum canal configurado (GATEWAY_MSG_CHAVE/PARA pela " +
+          "plataforma, ou GATEWAY_ALERTA_WEBHOOK) — o incidente ficou só no arquivo."
       );
     }
   } catch (e) {

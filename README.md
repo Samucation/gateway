@@ -297,27 +297,37 @@ cloudflared --config <caminho> tunnel ingress validate   # a flag vem ANTES do s
 
 O vigia detecta abuso e grava em `console/dados/incidentes.jsonl`, mas só isso
 não serve: ataque não escolhe hora, e ninguém fica com o console aberto às 3 da
-manhã. Dois canais, que podem estar ligados ao mesmo tempo:
+manhã.
+
+**O aviso sai pela plataforma de mensageria da casa** (`cafe-mobile-erp`), não
+por uma integração própria. O gateway é um tenant como qualquer outro:
 
 ```bash
-# Telegram — chega no bolso, e é o recomendado para ataque
-GATEWAY_TELEGRAM_TOKEN=123456:ABC...
-GATEWAY_TELEGRAM_CHAT=987654321
+GATEWAY_MSG_URL=http://cafe.interno:8050   # a plataforma, pelo gateway
+GATEWAY_MSG_CHAVE=<api key do tenant "gateway">
+GATEWAY_MSG_PARA=<chat id do Telegram, ou telefone com DDI>
+GATEWAY_MSG_CANAL=telegram                 # ou whatsapp
 
-# genérico — Discord, Slack, n8n (POST com JSON)
+# opcional, em paralelo — Discord, Slack, n8n
 GATEWAY_ALERTA_WEBHOOK=https://...
 ```
 
-O Telegram tem caminho próprio em vez de virar mais uma URL porque lá a mensagem
-precisa do `chat_id` **no corpo**, e o endereço carrega o token.
+🐞 A primeira versão falava com a API do Telegram **direto**. Funcionava e
+estava errada: dois lugares guardando token de bot, dois para consertar quando o
+Telegram mudar, e nenhum com idempotência. Usando a plataforma vem de graça o
+que não vale reimplementar — chave num lugar só, limite por tenant, dedupe por
+`Idempotency-Key`, e canal novo (WhatsApp hoje, web amanhã) sem tocar aqui.
 
-⚠️ O `chat_id` não é o nome de usuário. O bot só escreve para quem **já falou
-com ele** — regra do Telegram contra bot que persegue gente. Mande `/start` ao
-bot e pegue o id em `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+⚠️ O destinatário do Telegram é o **chat id**, não o nome de usuário — e o bot
+só escreve para quem **já falou com ele**. Mande `/start` antes.
 
-**Sem nenhum canal configurado, o vigia diz isso no log a cada alerta** em vez de
-ficar calado — um vigia que parece funcionar enquanto ninguém é avisado é pior
-que não ter vigia.
+⚠️ A plataforma é alcançada **pelo gateway** (`cafe.interno`). Gateway fora,
+aviso não sai — mas aí quem avisa são os watchdogs, que não dependem deste
+caminho.
+
+**Sem canal configurado, o vigia diz isso no log a cada alerta** em vez de ficar
+calado: um vigia que parece funcionar enquanto ninguém é avisado é pior que não
+ter vigia.
 
 ## Frontend
 
