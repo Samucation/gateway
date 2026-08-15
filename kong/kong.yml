@@ -1955,7 +1955,20 @@ services:
       },
     {
         name: sigmapay-sigma-payments,
-        url: http://app:8080,
+        # 🐞 Era `http://app:8080` — o unico upstream com nome generico
+        # deste arquivo. Dentro do gateway, `app` resolvia para o
+        # `plataforma-app` (o OpusChat), que tambem se chama `app` na
+        # rede dele: TODA chamada endereçada ao sigma-payments caia no
+        # serviço do vizinho.
+        #
+        # O sintoma enganava: 401, e nao 502. Um 502 gritaria "nao achei
+        # o serviço"; o 401 parece autenticacao, e alguem investiga
+        # credencial por horas antes de desconfiar do roteamento.
+        # Ninguem percebeu porque o app do sigma nunca subiu depois da
+        # migracao — nao havia com o que comparar.
+        #
+        # ⚠️ Upstream de gateway compartilhado NAO pode ter nome generico.
+        url: http://sigma-payments-app:8080,
         retries: 1,
         connect_timeout: 3000,
         write_timeout: 30000,

@@ -141,6 +141,7 @@ services:
       - sigma-financeiro_default
       - cafe-mobile-erp_default
       - central-ia_default
+      - sigma-payments_default
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 15s
@@ -155,6 +156,10 @@ networks:
   live-flow_default:
     external: true
   sigma-financeiro_default:
+    external: true
+  # 🐞 Faltava. O sigma-payments tinha rotas declaradas e o gateway nem
+  # alcançava a rede dele — a outra metade do defeito do upstream.
+  sigma-payments_default:
     external: true
   cafe-mobile-erp_default:
     external: true
