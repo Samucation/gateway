@@ -293,6 +293,32 @@ preservando o encoding e **validar antes de reiniciar**:
 cloudflared --config <caminho> tunnel ingress validate   # a flag vem ANTES do subcomando
 ```
 
+## Aviso de ataque no celular
+
+O vigia detecta abuso e grava em `console/dados/incidentes.jsonl`, mas só isso
+não serve: ataque não escolhe hora, e ninguém fica com o console aberto às 3 da
+manhã. Dois canais, que podem estar ligados ao mesmo tempo:
+
+```bash
+# Telegram — chega no bolso, e é o recomendado para ataque
+GATEWAY_TELEGRAM_TOKEN=123456:ABC...
+GATEWAY_TELEGRAM_CHAT=987654321
+
+# genérico — Discord, Slack, n8n (POST com JSON)
+GATEWAY_ALERTA_WEBHOOK=https://...
+```
+
+O Telegram tem caminho próprio em vez de virar mais uma URL porque lá a mensagem
+precisa do `chat_id` **no corpo**, e o endereço carrega o token.
+
+⚠️ O `chat_id` não é o nome de usuário. O bot só escreve para quem **já falou
+com ele** — regra do Telegram contra bot que persegue gente. Mande `/start` ao
+bot e pegue o id em `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+
+**Sem nenhum canal configurado, o vigia diz isso no log a cada alerta** em vez de
+ficar calado — um vigia que parece funcionar enquanto ninguém é avisado é pior
+que não ter vigia.
+
 ## Frontend
 
 O console de operação virá do **`sigma-payments/sigma-payments-ops-ui`**

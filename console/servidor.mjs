@@ -613,6 +613,51 @@ const servidor = createServer(async (req, res) => {
 const WEBHOOK = process.env.GATEWAY_ALERTA_WEBHOOK ?? "";
 const INTERVALO_VIGIA_MS = 5 * 60 * 1000;
 
+// ── TELEGRAM ────────────────────────────────────────────────────────────────
+//
+// O webhook genérico acima serve Discord, Slack e n8n, mas NÃO o Telegram: lá a
+// mensagem precisa do `chat_id` no corpo, e o endereço carrega o token. Por isso
+// o Telegram tem caminho próprio em vez de virar mais uma URL.
+//
+// É o canal certo para ataque, e a razão é simples: chega no celular. Um e-mail
+// às 3 da manhã é lido às 9.
+//
+//   GATEWAY_TELEGRAM_TOKEN=123456:ABC...   (o token do bot, pelo @BotFather)
+//   GATEWAY_TELEGRAM_CHAT=987654321        (para QUEM mandar)
+//
+// ⚠️ O `chat_id` não é o nome de usuário: o bot só escreve para quem JÁ falou
+// com ele — é regra do Telegram, contra bot que persegue gente. Mande "/start"
+// ao bot e pegue o id em https://api.telegram.org/bot<TOKEN>/getUpdates.
+const TG_TOKEN = process.env.GATEWAY_TELEGRAM_TOKEN ?? "";
+const TG_CHAT = process.env.GATEWAY_TELEGRAM_CHAT ?? "";
+
+async function avisarTelegram(texto) {
+  if (!TG_TOKEN || !TG_CHAT) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TG_CHAT,
+        text: texto,
+        // sem `parse_mode`: um IP com `_` ou `*` viraria markdown quebrado e o
+        // Telegram RECUSA a mensagem inteira — o aviso sumiria justo no ataque
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) {
+      const erro = await r.text().catch(() => "");
+      console.log(`[alerta] Telegram recusou (${r.status}): ${erro.slice(0, 200)}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.log("[alerta] falha ao falar com o Telegram: " + (e.message ?? e));
+    return false;
+  }
+}
+
 // 🐞 Sem esta memória o vigia repetiria o MESMO alerta a cada cinco minutos
 // enquanto o ataque durasse — e aviso que repete demais é aviso que se aprende
 // a ignorar, que é pior do que não avisar.
@@ -650,19 +695,32 @@ async function vigiar() {
       console.log(`[alerta ${a.nivel}] ${a.ip} — ${a.texto}`);
       await anexar(ARQ_INCIDENTES, { quando: new Date().toISOString(), ...a });
     }
-    if (!WEBHOOK) return;
-
     const texto =
       `⚠️ Gateway — ${novos.length} sinal(is) de abuso nos últimos 15 min:\n` +
       novos.map((a) => `• ${a.ip}: ${a.texto}`).join("\n");
-    await fetch(WEBHOOK, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      // `text` e `content` juntos: Slack/n8n leem o primeiro, Discord o segundo.
-      // Mandar os dois evita um adaptador por serviço.
-      body: JSON.stringify({ text: texto, content: texto, alertas: novos }),
-      signal: AbortSignal.timeout(10000),
-    }).catch((e) => console.log("falha ao avisar o webhook: " + e.message));
+
+    // Telegram primeiro: é o que chega no celular. Os dois podem estar ligados
+    // ao mesmo tempo — quem quiser o alerta no Discord E no bolso, tem.
+    const foiTelegram = await avisarTelegram(texto);
+
+    if (WEBHOOK) {
+      await fetch(WEBHOOK, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // `text` e `content` juntos: Slack/n8n leem o primeiro, Discord o segundo.
+        // Mandar os dois evita um adaptador por serviço.
+        body: JSON.stringify({ text: texto, content: texto, alertas: novos }),
+        signal: AbortSignal.timeout(10000),
+      }).catch((e) => console.log("falha ao avisar o webhook: " + e.message));
+    } else if (!foiTelegram) {
+      // Nenhum canal configurado. Dizer isso EM VOZ ALTA no log é melhor que o
+      // silêncio: senão o vigia parece funcionando enquanto ninguém é avisado —
+      // que é o pior desfecho possível para um alerta de ataque.
+      console.log(
+        "[alerta] nenhum canal configurado (GATEWAY_TELEGRAM_TOKEN/CHAT ou " +
+          "GATEWAY_ALERTA_WEBHOOK) — o incidente ficou só no arquivo."
+      );
+    }
   } catch (e) {
     console.log("vigia falhou nesta rodada: " + (e.message ?? e));
   }
