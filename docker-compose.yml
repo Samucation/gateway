@@ -99,6 +99,27 @@ services:
       KONG_DNS_ORDER: "LAST,A,CNAME"
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
+    tmpfs:
+      # ⚠️ SEM isto o gateway não volta de um restart. O Kong cria sockets de
+      # unix domain aqui; se o container reinicia sem limpar a camada de
+      # escrita, o arquivo velho continua lá e o nginx morre com
+      #
+      #   bind() to unix:/usr/local/kong/sockets/we failed (Address already in use)
+      #
+      # Ele tenta 5 vezes, desiste, sai com código 1, o `restart: unless-stopped`
+      # sobe de novo e encontra o MESMO socket — laço infinito. Aconteceu em
+      # 15/08/2026 e derrubou os CINCO projetos de uma vez: 502 em todos os
+      # domínios, com as aplicações de pé o tempo todo.
+      #
+      # tmpfs nasce vazio a cada subida, então o socket velho nunca existe.
+      #
+      # `uid`/`gid` 1000 são o usuário `kong` da imagem: sem eles o tmpfs nasce
+      # do root e o Kong não consegue criar o socket — troca um jeito de não
+      # subir por outro.
+      #
+      # O Kong do cafe-mobile-erp já tinha esta proteção e eu não a trouxe na
+      # migração. Copiar rota e plugin não basta: as defesas do compose contam.
+      - /usr/local/kong/sockets:uid=1000,gid=1000,mode=0755
     ports:
       # 8050, e não 8040: a 8040 já é do `central-voz-whisper`. Conferir porta
       # livre antes de escolher — o compose falha no `up` com "port is already
