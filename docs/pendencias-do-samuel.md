@@ -54,3 +54,20 @@ allowlist + 2FA na aplicação. Fechá-lo no host interno (como `/painel` e
   descreve o primeiro cliente, não o produto — e agora o gateway depende dele,
   o que torna a confusão mais cara. Mexe em rede Docker, container, host do
   gateway (`cafe-api...`) e túnel: fazer numa janela combinada.
+
+## Lista de aplicações confiáveis, com tela no console (16/08/2026)
+
+Pedido do Samuel ao integrar outro app ao OpusChat: as aplicações do próprio
+ecossistema não podem ser estranguladas pelo rate-limit, e a lista de quem é
+confiável precisa de **tela**, não de edição de arquivo. O console já existe
+(`console/ui`), então é onde nasce.
+
+⚠️ **Antes de construir, ler `docs/melhoria-whitelist-de-aplicacoes.md`.** A
+intenção declarada foi "mesmo que a gente seja invadido, ninguém tome posse" —
+e uma whitelist **por IP não entrega isso**: o invasor dentro do servidor *é* o
+IP confiável, e ainda ganharia um caminho sem freio. A lista tem que ser de
+**credencial**, com o IP como condição adicional.
+
+O primeiro passo resolve quase tudo sozinho e não depende de tela: trocar
+`limit_by: ip` por `limit_by: header` (Authorization) nas rotas da API de
+mensageria — é o que a rota da mesa do atendente já faz.
