@@ -785,7 +785,19 @@ services:
                             minute: 600,
                             hour: 20000,
                             policy: local,
-                            limit_by: ip,
+                            # ⚠️ Limitado por CREDENCIAL, não por IP.
+                            #
+                            # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+                            # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+                            # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+                            # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+                            # OpusChat.
+                            #
+                            # `limit_by: header` no `Authorization` usa a chave como contador — cada
+                            # cliente ganha o próprio balde. Quem chega sem credencial cai no
+                            # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+                            limit_by: header,
+                            header_name: Authorization,
                             fault_tolerant: true,
                             hide_client_headers: false
                           }
@@ -845,7 +857,19 @@ services:
                         # A operação é nossa e o volume é humano. Teto apertado: chamada de mais
                       # aqui é varredura, não uso.
                         name: rate-limiting,
-                        config: { minute: 120, policy: local, limit_by: ip, fault_tolerant: true }
+                        config: { minute: 120, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
+ #
+ # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+ # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+ # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+ # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+ # OpusChat.
+ #
+ # `limit_by: header` no `Authorization` usa a chave como contador — cada
+ # cliente ganha o próprio balde. Quem chega sem credencial cai no
+ # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+ limit_by: header,
+ header_name: Authorization, fault_tolerant: true }
                       },
                     {
                         # As rotas do operador enxergam TODOS os clientes. Além do escopo
@@ -1012,7 +1036,19 @@ services:
                       # 60/min é folgado para uma pessoa operando e apertado para varredura. O teto
                       # por HORA existe para o ataque lento, que respeita o limite por minuto.
                         name: rate-limiting,
-                        config: { minute: 60, hour: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                        config: { minute: 60, hour: 600, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
+ #
+ # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+ # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+ # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+ # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+ # OpusChat.
+ #
+ # `limit_by: header` no `Authorization` usa a chave como contador — cada
+ # cliente ganha o próprio balde. Quem chega sem credencial cai no
+ # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+ limit_by: header,
+ header_name: Authorization, fault_tolerant: true }
                       }
                   ]
               },
@@ -1035,7 +1071,19 @@ services:
                   [
                     {
                         name: rate-limiting,
-                        config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                        config: { minute: 600, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
+ #
+ # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+ # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+ # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+ # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+ # OpusChat.
+ #
+ # `limit_by: header` no `Authorization` usa a chave como contador — cada
+ # cliente ganha o próprio balde. Quem chega sem credencial cai no
+ # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+ limit_by: header,
+ header_name: Authorization, fault_tolerant: true }
                       }
                   ]
               },
