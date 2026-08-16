@@ -752,7 +752,25 @@ services:
                 paths: [ /v1/messaging ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    # ⚠️ `opuschat` e o nome CANONICO deste produto.
+                    #
+                    # O `cafe-api` e heranca: o repositorio nasceu como ERP
+                    # do cafe, a plataforma cresceu dentro dele, e o dominio
+                    # ficou com o nome errado. Quem olha de fora conclui que
+                    # o OpusChat e um pedaco do ERP — o contrario do que ele
+                    # e: um chatbot agnostico de plataforma, com portal, loja
+                    # e mesa proprios. Nenhuma rota de ERP passa por aqui.
+                    #
+                    # Os dois convivem de PROPOSITO. Chave de cliente, webhook
+                    # do Telegram e redirect do Google podem estar gravados
+                    # com o host antigo; derrubar o `cafe-api` no mesmo dia
+                    # transforma correcao de nome em incidente. Migra-se cada
+                    # consumidor, e so entao ele e aposentado.
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -855,7 +873,11 @@ services:
                 paths: [ /v1/signup, /v1/login ],
                 strip_path: false,
                 methods: [ POST, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -896,7 +918,11 @@ services:
               # matched" — que não parece erro de rota, parece tela quebrada.
               # Método novo no app pede método novo aqui, sempre.
                 methods: [ GET, POST, PUT, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -970,7 +996,11 @@ services:
                 paths: [ /v1/marketing ],
                 strip_path: false,
                 methods: [ GET, POST, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -996,7 +1026,11 @@ services:
                 paths: [ /v1/atendimento/concluido ],
                 strip_path: false,
                 methods: [ POST ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -1007,7 +1041,11 @@ services:
               },
             {
                 name: plataforma-api-operador-bloqueio-publico,
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 paths: [ /v1/platform ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
@@ -1057,7 +1095,11 @@ services:
                 paths: [ ~/v1/messaging/webhooks/.* ],
                 strip_path: false,
                 methods: [ GET, POST ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -1107,7 +1149,11 @@ services:
                 paths: [ /, /inicio, /portal ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -1165,7 +1211,11 @@ services:
                 paths: [ /docs ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 plugins:
                   [
                     {
@@ -1212,7 +1262,11 @@ services:
               },
             {
                 name: plataforma-web-painel-bloqueio-publico,
-                hosts: [ cafe-api.cursodetecnologia.dev.br ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
                 paths: [ /painel ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
