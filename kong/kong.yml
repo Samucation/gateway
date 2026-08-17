@@ -943,7 +943,7 @@ services:
                 # 🐞 Path novo no app pede path novo aqui, SEMPRE. Sem isso a
                 # tela abre (o GET cai na rota do site) e todo botao morre em
                 # "no Route matched" — que parece tela quebrada, nao gateway.
-                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe, /v1/painel, /v1/planos, /v1/pagamentos ],
+                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe, /v1/painel, /v1/planos, /v1/pagamentos, /v1/senha ],
                 strip_path: false,
                 # PUT entra para os AJUSTES do cliente (os tempos do semáforo).
               #
