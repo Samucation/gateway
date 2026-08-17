@@ -943,7 +943,7 @@ services:
                 # 🐞 Path novo no app pede path novo aqui, SEMPRE. Sem isso a
                 # tela abre (o GET cai na rota do site) e todo botao morre em
                 # "no Route matched" — que parece tela quebrada, nao gateway.
-                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe, /v1/painel ],
+                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe, /v1/painel, /v1/planos, /v1/pagamentos ],
                 strip_path: false,
                 # PUT entra para os AJUSTES do cliente (os tempos do semáforo).
               #
@@ -1202,6 +1202,67 @@ services:
         read_timeout: 15000,
         routes:
           [
+            # A TELA DE CHECKOUT, com CSP propria.
+          #
+          # ⚠️ Rota separada por SEGURANCA, e nao por organizacao.
+          #
+          # O formulario do cartao e montado pelo SDK da adquirente, em iframes
+          # que pertencem a ela — e a CSP global (`default-src 'self'`) barra
+          # tres coisas de uma vez: o <script> do SDK, os iframes dos campos e o
+          # fetch de tokenizacao. O sintoma seria cruel: a pagina abre, o resto
+          # funciona, e os campos do cartao simplesmente NAO APARECEM.
+          #
+          # 📌 A folga fica SO nesta rota. Afrouxar a CSP global para o checkout
+          # funcionar deixaria todas as telas aceitando script de fora — e a CSP
+          # existe justamente para que uma injecao em um campo qualquer nao vire
+          # script rodando com a credencial do atendente na memoria da aba.
+          #
+          # `frame-src` precisa estar explicito: sem ele o navegador cai no
+          # `default-src`, e os iframes do cartao morrem calados.
+            {
+                name: plataforma-web-checkout,
+                paths: [ /planos ],
+                strip_path: false,
+                methods: [ GET, OPTIONS ],
+                hosts:
+                  [
+                    opuschat.cursodetecnologia.dev.br,
+                    cafe-api.cursodetecnologia.dev.br,
+                  ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
+                      },
+                    {
+                        name: response-transformer,
+                        config:
+                          {
+                            remove: { headers: [ "Content-Security-Policy" ] },
+                            add:
+                              {
+                                headers:
+                                  [
+                                    "Content-Security-Policy: default-src 'self';
+                                      script-src 'self' 'unsafe-inline'
+                                      https://sdk.mercadopago.com
+                                      https://http2.mlstatic.com; style-src 'self'
+                                      'unsafe-inline'; img-src 'self' data:
+                                      https://http2.mlstatic.com; font-src 'self';
+                                      connect-src 'self' https://api.mercadopago.com
+                                      https://api.mercadolibre.com; frame-src
+                                      https://sdk.mercadopago.com
+                                      https://www.mercadopago.com; object-src 'none';
+                                      base-uri 'self'; form-action 'self';
+                                      frame-ancestors 'none'",
+                                  ],
+                              },
+                          },
+                      }
+                  ]
+              },
+
             {
                 name: plataforma-web-publico,
                 paths: [ /, /inicio, /portal ],
