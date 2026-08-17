@@ -933,7 +933,17 @@ services:
           # atendente, não um servidor.
             {
                 name: plataforma-api-mesa-do-atendente,
-                paths: [ /v1/atendimento ],
+                # A fila do PROFISSIONAL e o vocabulario do ramo entram nesta
+                # mesma rota, e nao numa nova: sao chamadas pelo MESMO
+                # navegador, no MESMO ritmo, com a MESMA credencial. Rota
+                # separada teria que repetir teto, CORS e metodos — e o dia em
+                # que os dois divergissem seria um bug que ninguem procura no
+                # gateway.
+                #
+                # 🐞 Path novo no app pede path novo aqui, SEMPRE. Sem isso a
+                # tela abre (o GET cai na rota do site) e todo botao morre em
+                # "no Route matched" — que parece tela quebrada, nao gateway.
+                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe ],
                 strip_path: false,
                 # PUT entra para os AJUSTES do cliente (os tempos do semáforo).
               #
