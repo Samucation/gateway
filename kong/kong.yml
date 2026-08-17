@@ -2268,5 +2268,79 @@ services:
                 config: { allowed_payload_size: 4, size_unit: megabytes }
               }
           ]
-      }
+      },
+
+  # =========================================================================
+  # sigma-midia — armazenamento de arquivos e imagens (agnostico de aplicacao)
+  #
+  # ⚠️ O BYTE DO ARQUIVO NAO PASSA POR AQUI.
+  #
+  # O servico devolve uma URL ASSINADA e o cliente faz o PUT direto no motor
+  # de objetos (MinIO em hmg, S3 em prd). Por isso o teto de corpo abaixo e
+  # pequeno: por este caminho so trafega JSON de controle. Se um dia alguem
+  # ver 413 subindo arquivo, o erro esta em ter mandado o arquivo para o
+  # gateway -- nao no teto.
+  #
+  # Nome de upstream ESPECIFICO, e nao : ver a licao registrada no
+  # sigmapay-sigma-payments, em que um nome generico fez toda chamada cair no
+  # servico do vizinho -- com 401, que parece autenticacao e nao roteamento.
+  # =========================================================================
+  {
+      name: sigmamidia-sigma-midia,
+      url: http://sigma-midia:3400,
+      retries: 1,
+      connect_timeout: 3000,
+      write_timeout: 15000,
+      read_timeout: 15000,
+
+      routes:
+        [
+          # ==================================================================
+          # API DAS APLICACOES — o unico caminho publicado
+          # ==================================================================
+          # Limite por IP, bruto. O limite POR APLICACAO e a cota, que vive no
+          # Postgres do servico: so ele sabe de quem e a chave.
+          {
+              name: sigmamidia-api-v1,
+              paths: [ "/api/v1" ],
+              strip_path: false,
+              preserve_host: true,
+              plugins:
+                [
+                  {
+                      name: rate-limiting,
+                      config: { minute: 600, policy: local, fault_tolerant: true }
+                    }
+                ],
+              hosts: [ sigma-midia.cursodetecnologia.dev.br ]
+            }
+
+          # ==================================================================
+          # /api/admin/** FICA DE FORA, e nao por esquecimento
+          # ==================================================================
+          # O portal ainda nao tem login de operador. Publicar a rota de admin
+          # daria a qualquer um na internet o poder de aprovar a propria
+          # aplicacao e emitir chave para ela.
+          #
+          # Enquanto nao houver autenticacao de pessoa, o admin so e alcancavel
+          # pela rede interna. Este comentario e a trava: rota nova aqui e
+          # decisao consciente.
+          # ==================================================================
+        ],
+
+      plugins:
+        [
+          {
+              # 1 MB. Por este caminho so passa JSON de controle -- pedir
+              # autorizacao, confirmar, consultar. O arquivo vai direto ao
+              # motor, por URL assinada.
+              name: request-size-limiting,
+              config: { allowed_payload_size: 1, size_unit: megabytes }
+            },
+          {
+              name: prometheus,
+              config: { status_code_metrics: true, latency_metrics: true }
+            }
+        ]
+    }
   ]
