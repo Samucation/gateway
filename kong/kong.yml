@@ -752,25 +752,7 @@ services:
                 paths: [ /v1/messaging ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts:
-                  [
-                    # ⚠️ `opuschat` e o nome CANONICO deste produto.
-                    #
-                    # O `cafe-api` e heranca: o repositorio nasceu como ERP
-                    # do cafe, a plataforma cresceu dentro dele, e o dominio
-                    # ficou com o nome errado. Quem olha de fora conclui que
-                    # o OpusChat e um pedaco do ERP — o contrario do que ele
-                    # e: um chatbot agnostico de plataforma, com portal, loja
-                    # e mesa proprios. Nenhuma rota de ERP passa por aqui.
-                    #
-                    # Os dois convivem de PROPOSITO. Chave de cliente, webhook
-                    # do Telegram e redirect do Google podem estar gravados
-                    # com o host antigo; derrubar o `cafe-api` no mesmo dia
-                    # transforma correcao de nome em incidente. Migra-se cada
-                    # consumidor, e so entao ele e aposentado.
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -786,16 +768,16 @@ services:
                             hour: 20000,
                             policy: local,
                             # ⚠️ Limitado por CREDENCIAL, não por IP.
-                            #
-                            # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
-                            # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
-                            # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
-                            # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
-                            # OpusChat.
-                            #
-                            # `limit_by: header` no `Authorization` usa a chave como contador — cada
-                            # cliente ganha o próprio balde. Quem chega sem credencial cai no
-                            # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+                          #
+                          # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+                          # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+                          # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+                          # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+                          # OpusChat.
+                          #
+                          # `limit_by: header` no `Authorization` usa a chave como contador — cada
+                          # cliente ganha o próprio balde. Quem chega sem credencial cai no
+                          # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
                             limit_by: header,
                             header_name: Authorization,
                             fault_tolerant: true,
@@ -857,19 +839,25 @@ services:
                         # A operação é nossa e o volume é humano. Teto apertado: chamada de mais
                       # aqui é varredura, não uso.
                         name: rate-limiting,
-                        config: { minute: 120, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
- #
- # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
- # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
- # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
- # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
- # OpusChat.
- #
- # `limit_by: header` no `Authorization` usa a chave como contador — cada
- # cliente ganha o próprio balde. Quem chega sem credencial cai no
- # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
- limit_by: header,
- header_name: Authorization, fault_tolerant: true }
+                        config:
+                          {
+                            minute: 120,
+                            policy: local,
+                            # ⚠️ Limitado por CREDENCIAL, não por IP.
+                          #
+                          # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+                          # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+                          # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+                          # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+                          # OpusChat.
+                          #
+                          # `limit_by: header` no `Authorization` usa a chave como contador — cada
+                          # cliente ganha o próprio balde. Quem chega sem credencial cai no
+                          # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+                            limit_by: header,
+                            header_name: Authorization,
+                            fault_tolerant: true
+                          }
                       },
                     {
                         # As rotas do operador enxergam TODOS os clientes. Além do escopo
@@ -897,11 +885,7 @@ services:
                 paths: [ /v1/signup, /v1/login ],
                 strip_path: false,
                 methods: [ POST, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -933,17 +917,29 @@ services:
           # atendente, não um servidor.
             {
                 name: plataforma-api-mesa-do-atendente,
-                # A fila do PROFISSIONAL e o vocabulario do ramo entram nesta
-                # mesma rota, e nao numa nova: sao chamadas pelo MESMO
-                # navegador, no MESMO ritmo, com a MESMA credencial. Rota
-                # separada teria que repetir teto, CORS e metodos — e o dia em
-                # que os dois divergissem seria um bug que ninguem procura no
-                # gateway.
-                #
-                # 🐞 Path novo no app pede path novo aqui, SEMPRE. Sem isso a
-                # tela abre (o GET cai na rota do site) e todo botao morre em
-                # "no Route matched" — que parece tela quebrada, nao gateway.
-                paths: [ /v1/atendimento, /v1/ramo, /v1/profissionais, /v1/equipe, /v1/painel, /v1/configuracoes, /v1/convite, /v1/planos, /v1/pagamentos, /v1/senha, /v1/eu ],
+                # A fila do PROFISSIONAL e o vocabulário do ramo entram nesta mesma
+              # rota, e não numa nova: são chamadas pelo MESMO navegador, no MESMO
+              # ritmo, com a MESMA credencial. Rota separada teria que repetir teto,
+              # CORS e métodos — e o dia em que os dois divergissem seria um bug que
+              # ninguém procura no gateway.
+              #
+              # 🐞 Path novo no app pede path novo AQUI, sempre. Sem isso a tela
+              # abre (o GET cai na rota `/` do site) e todo botão morre em "no Route
+              # matched" — que parece tela quebrada, não gateway.
+                paths:
+                  [
+                    /v1/atendimento,
+                    /v1/ramo,
+                    /v1/profissionais,
+                    /v1/equipe,
+                    /v1/painel,
+                    /v1/configuracoes,
+                    /v1/convite,
+                    /v1/planos,
+                    /v1/pagamentos,
+                    /v1/senha,
+                    /v1/eu
+                  ],
                 strip_path: false,
                 # PUT entra para os AJUSTES do cliente (os tempos do semáforo).
               #
@@ -951,12 +947,8 @@ services:
               # tela abre, o formulário envia, e o gateway devolve "no Route
               # matched" — que não parece erro de rota, parece tela quebrada.
               # Método novo no app pede método novo aqui, sempre.
-                methods: [ GET, POST, PUT, DELETE, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                methods: [ GET, POST, PUT, OPTIONS ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -1030,11 +1022,7 @@ services:
                 paths: [ /v1/marketing ],
                 strip_path: false,
                 methods: [ GET, POST, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -1046,19 +1034,26 @@ services:
                       # 60/min é folgado para uma pessoa operando e apertado para varredura. O teto
                       # por HORA existe para o ataque lento, que respeita o limite por minuto.
                         name: rate-limiting,
-                        config: { minute: 60, hour: 600, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
- #
- # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
- # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
- # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
- # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
- # OpusChat.
- #
- # `limit_by: header` no `Authorization` usa a chave como contador — cada
- # cliente ganha o próprio balde. Quem chega sem credencial cai no
- # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
- limit_by: header,
- header_name: Authorization, fault_tolerant: true }
+                        config:
+                          {
+                            minute: 60,
+                            hour: 600,
+                            policy: local,
+                            # ⚠️ Limitado por CREDENCIAL, não por IP.
+                          #
+                          # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+                          # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+                          # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+                          # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+                          # OpusChat.
+                          #
+                          # `limit_by: header` no `Authorization` usa a chave como contador — cada
+                          # cliente ganha o próprio balde. Quem chega sem credencial cai no
+                          # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+                            limit_by: header,
+                            header_name: Authorization,
+                            fault_tolerant: true
+                          }
                       }
                   ]
               },
@@ -1072,38 +1067,36 @@ services:
                 paths: [ /v1/atendimento/concluido ],
                 strip_path: false,
                 methods: [ POST ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
                         name: rate-limiting,
-                        config: { minute: 600, policy: local, # ⚠️ Limitado por CREDENCIAL, não por IP.
- #
- # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
- # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
- # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
- # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
- # OpusChat.
- #
- # `limit_by: header` no `Authorization` usa a chave como contador — cada
- # cliente ganha o próprio balde. Quem chega sem credencial cai no
- # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
- limit_by: header,
- header_name: Authorization, fault_tolerant: true }
+                        config:
+                          {
+                            minute: 600,
+                            policy: local,
+                            # ⚠️ Limitado por CREDENCIAL, não por IP.
+                          #
+                          # 🐞 Era `limit_by: ip`. Todos os contêineres desta máquina saem pelo
+                          # MESMO IP, então dois clientes dividiam o mesmo balde: um vizinho
+                          # barulhento estrangulava o outro, e o sintoma (429 aleatório) não
+                          # aponta para a causa. Apareceu ao integrar um segundo aplicativo ao
+                          # OpusChat.
+                          #
+                          # `limit_by: header` no `Authorization` usa a chave como contador — cada
+                          # cliente ganha o próprio balde. Quem chega sem credencial cai no
+                          # `limit_by` de reserva (o IP): sem chave não há cliente a isolar.
+                            limit_by: header,
+                            header_name: Authorization,
+                            fault_tolerant: true
+                          }
                       }
                   ]
               },
             {
                 name: plataforma-api-operador-bloqueio-publico,
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 paths: [ /v1/platform ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
@@ -1153,11 +1146,7 @@ services:
                 paths: [ ~/v1/messaging/webhooks/.* ],
                 strip_path: false,
                 methods: [ GET, POST ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -1201,64 +1190,70 @@ services:
         connect_timeout: 5000,
         read_timeout: 15000,
         routes:
-          [
-            # A TELA DE CHECKOUT, com CSP propria.
+          # A TELA DE CHECKOUT, com CSP própria.
           #
-          # ⚠️ Rota separada por SEGURANCA, e nao por organizacao.
+          # ⚠️ Rota separada por SEGURANÇA, e não por organização.
           #
-          # O formulario do cartao e montado pelo SDK da adquirente, em iframes
-          # que pertencem a ela — e a CSP global (`default-src 'self'`) barra
-          # tres coisas de uma vez: o <script> do SDK, os iframes dos campos e o
-          # fetch de tokenizacao. O sintoma seria cruel: a pagina abre, o resto
-          # funciona, e os campos do cartao simplesmente NAO APARECEM.
+          # O formulário do cartão é montado pelo SDK da adquirente, em iframes que
+          # pertencem a ela — e a CSP global (`default-src 'self'`) barra três
+          # coisas de uma vez: o <script> do SDK, os iframes dos campos e o fetch de
+          # tokenização. O sintoma seria cruel: a página abre, o resto funciona, e
+          # os campos do cartão simplesmente NÃO APARECEM.
           #
-          # 📌 A folga fica SO nesta rota. Afrouxar a CSP global para o checkout
+          # 📌 A folga fica SÓ nesta rota. Afrouxar a CSP global para o checkout
           # funcionar deixaria todas as telas aceitando script de fora — e a CSP
-          # existe justamente para que uma injecao em um campo qualquer nao vire
-          # script rodando com a credencial do atendente na memoria da aba.
+          # existe justamente para que uma injeção em um campo qualquer não vire
+          # script rodando com a credencial do atendente na memória da aba.
           #
-          # `frame-src` precisa estar explicito: sem ele o navegador cai no
-          # `default-src`, e os iframes do cartao morrem calados.
+          # `frame-src` precisa estar explícito: sem ele o navegador cai no
+          # `default-src`, e os iframes do cartão morrem calados.
+          #
+          # 🐞 Esta rota existia SÓ no `kong/kong.yml` gerado do gateway, posta à
+          # mão. Rodar o gerador a apagava, e o checkout voltava a herdar a CSP
+          # global — quebrando o pagamento sem erro nenhum no log do gateway.
+          [
             {
                 name: plataforma-web-checkout,
                 paths: [ /planos ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
+                        # O checkout: CSP própria, folgada só onde o SDK da adquirente precisa.
+                      # Ver o comentário longo na rota `web-checkout`.
                         name: rate-limiting,
                         config: { minute: 600, policy: local, limit_by: ip, fault_tolerant: true }
                       },
                     {
                         name: response-transformer,
                         config:
+                          # `remove` ANTES do `add`: a aplicação já manda a CSP global, e sem tirar
+                          # a de lá o navegador recebe duas e aplica a INTERSEÇÃO — a folga não
+                          # valeria de nada, e o sintoma seria o mesmo de não ter feito nada.
                           {
-                            remove: { headers: [ "Content-Security-Policy" ] },
+                            remove: { headers: [ Content-Security-Policy ] },
                             add:
                               {
                                 headers:
                                   [
-                                    "Content-Security-Policy: default-src 'self';
-                                      script-src 'self' 'unsafe-inline'
+                                    "Content-Security-Policy: default-src
+                                      'self'; script-src 'self' 'unsafe-inline'
                                       https://sdk.mercadopago.com
-                                      https://http2.mlstatic.com; style-src 'self'
-                                      'unsafe-inline'; img-src 'self' data:
-                                      https://http2.mlstatic.com; font-src 'self';
-                                      connect-src 'self' https://api.mercadopago.com
+                                      https://http2.mlstatic.com; style-src
+                                      'self' 'unsafe-inline'; img-src 'self'
+                                      data: https://http2.mlstatic.com; font-src
+                                      'self'; connect-src 'self'
+                                      https://api.mercadopago.com
                                       https://api.mercadolibre.com; frame-src
                                       https://sdk.mercadopago.com
-                                      https://www.mercadopago.com; object-src 'none';
-                                      base-uri 'self'; form-action 'self';
-                                      frame-ancestors 'none'",
-                                  ],
-                              },
-                          },
+                                      https://www.mercadopago.com; object-src
+                                      'none'; base-uri 'self'; form-action
+                                      'self'; frame-ancestors 'none'"
+                                  ]
+                              }
+                          }
                       }
                   ]
               },
@@ -1268,11 +1263,7 @@ services:
                 paths: [ /, /inicio, /portal ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -1330,11 +1321,7 @@ services:
                 paths: [ /docs ],
                 strip_path: false,
                 methods: [ GET, OPTIONS ],
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 plugins:
                   [
                     {
@@ -1381,11 +1368,7 @@ services:
               },
             {
                 name: plataforma-web-painel-bloqueio-publico,
-                hosts:
-                  [
-                    opuschat.cursodetecnologia.dev.br,
-                    cafe-api.cursodetecnologia.dev.br,
-                  ],
+                hosts: [ opuschat.cursodetecnologia.dev.br, cafe-api.cursodetecnologia.dev.br ],
                 paths: [ /painel ],
                 strip_path: false,
                 methods: [ GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS ],
@@ -1464,26 +1447,10 @@ services:
                           #
                           # `connect-src 'self'`: o fetch da tela só fala com a nossa origem.
                           # É o que impede um script injetado de mandar a credencial embora.
-                            # ⚠️ `accounts.google.com` entra AQUI, e so ele.
-                          #
-                          # O "entrar com o Google" precisa do script deles, de um iframe
-                          # deles e de uma chamada para eles. Sem estas tres origens o
-                          # botao nao aparece — e o sintoma e cruel: a tela abre, o login
-                          # por senha funciona, e o botao do Google simplesmente nao existe,
-                          # sem nada no log.
-                          #
-                          # 📌 E uma origem, nao um coringa. `script-src 'self' https:`
-                          # resolveria tambem e abriria a porta para QUALQUER dominio —
-                          # que e exatamente o que a CSP existe para fechar.
                             "Content-Security-Policy: default-src 'self';
-                              script-src 'self' 'unsafe-inline'
-                              https://accounts.google.com
-                              https://apis.google.com; style-src
-                              'self' 'unsafe-inline' https://accounts.google.com;
-                              img-src 'self' data: https://lh3.googleusercontent.com;
-                              font-src 'self'; connect-src 'self'
-                              https://accounts.google.com; frame-src
-                              https://accounts.google.com; object-src
+                              script-src 'self' 'unsafe-inline'; style-src
+                              'self' 'unsafe-inline'; img-src 'self' data:;
+                              font-src 'self'; connect-src 'self'; object-src
                               'none'; base-uri 'self'; form-action 'self';
                               frame-ancestors 'none'",
 
@@ -2144,19 +2111,17 @@ services:
       },
     {
         name: sigmapay-sigma-payments,
-        # 🐞 Era `http://app:8080` — o unico upstream com nome generico
-        # deste arquivo. Dentro do gateway, `app` resolvia para o
-        # `plataforma-app` (o OpusChat), que tambem se chama `app` na
-        # rede dele: TODA chamada endereçada ao sigma-payments caia no
-        # serviço do vizinho.
-        #
-        # O sintoma enganava: 401, e nao 502. Um 502 gritaria "nao achei
-        # o serviço"; o 401 parece autenticacao, e alguem investiga
-        # credencial por horas antes de desconfiar do roteamento.
-        # Ninguem percebeu porque o app do sigma nunca subiu depois da
-        # migracao — nao havia com o que comparar.
-        #
-        # ⚠️ Upstream de gateway compartilhado NAO pode ter nome generico.
+        # 🐞 Era `http://app:8080` — o único upstream com nome genérico deste
+      # arquivo. Dentro do gateway compartilhado, `app` resolvia para o
+      # `plataforma-app` (o OpusChat), que também se chama `app` na rede dele:
+      # TODA chamada endereçada ao sigma-payments caía no serviço do vizinho.
+      #
+      # O sintoma enganava: 401, e não 502. Um 502 gritaria "não achei o
+      # serviço"; o 401 fez procurar credencial por horas antes de desconfiar
+      # do roteamento. Ninguém percebeu porque o app do sigma nunca subiu
+      # depois da migração — não havia com o que comparar.
+      #
+      # ⚠️ Upstream de gateway compartilhado NÃO pode ter nome genérico.
         url: http://sigma-payments-app:8080,
         retries: 1,
         connect_timeout: 3000,
@@ -2346,78 +2311,165 @@ services:
               }
           ]
       },
+    {
+        name: sigmamidia-sigma-midia,
+        url: http://sigma-midia:3400,
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 15000,
+        read_timeout: 15000,
 
+        routes:
+          # Limite por IP, bruto. O limite POR APLICAÇÃO é a cota, que vive no
+          # Postgres do serviço: só ele sabe de quem é a chave.
+          [
+            {
+                name: sigmamidia-api-v1,
+                paths: [ "/api/v1" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ sigma-midia.cursodetecnologia.dev.br ]
+              }
+          ],
+        # ==================================================================
+        # /api/admin e /api/portal NÃO ficam neste service — ficam no do
+        # portal, abaixo.
+        # ==================================================================
+        # Não é arrumação. O nginx do portal tem uma ALLOWLIST: `/api/`
+        # responde 404 e só `/api/admin/` e `/api/portal/` são encaminhados.
+        # Passando por ele, caminho novo do backend nasce FECHADO para a
+        # internet, e publicar um exige escrever isso em dois lugares.
+        #
+        # Apontar essas rotas direto para :3400 daqui contornaria a allowlist
+        # e devolveria a decisão para o esquecimento.
+        # ==================================================================
+
+        plugins:
+          [
+            {
+                name: request-size-limiting,
+                config: { allowed_payload_size: 1, size_unit: megabytes }
+              },
+            {
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true }
+              }
+          ]
+      },
+
+    # =========================================================================
+  # O PORTAL — páginas e as APIs que elas usam
+  #
+  # Upstream é o NGINX do portal, não o Spring. Ver a nota acima: é o nginx
+  # que carrega a allowlist de caminhos.
+  #
+  # ⚠️ HISTÓRICO: até 17/08/2026 havia aqui uma trava dizendo que
+  # `/api/admin` ficava de fora porque "o portal ainda não tem login de
+  # operador". Passou a ter — senha com BCrypt, sessão opaca revogável no
+  # banco e bloqueio após 5 tentativas. A trava deixou de valer, e por isso
+  # saiu; não foi afrouxamento por conveniência.
   # =========================================================================
-  # sigma-midia — armazenamento de arquivos e imagens (agnostico de aplicacao)
-  #
-  # ⚠️ O BYTE DO ARQUIVO NAO PASSA POR AQUI.
-  #
-  # O servico devolve uma URL ASSINADA e o cliente faz o PUT direto no motor
-  # de objetos (MinIO em hmg, S3 em prd). Por isso o teto de corpo abaixo e
-  # pequeno: por este caminho so trafega JSON de controle. Se um dia alguem
-  # ver 413 subindo arquivo, o erro esta em ter mandado o arquivo para o
-  # gateway -- nao no teto.
-  #
-  # Nome de upstream ESPECIFICO, e nao : ver a licao registrada no
-  # sigmapay-sigma-payments, em que um nome generico fez toda chamada cair no
-  # servico do vizinho -- com 401, que parece autenticacao e nao roteamento.
-  # =========================================================================
-  {
-      name: sigmamidia-sigma-midia,
-      url: http://sigma-midia:3400,
-      retries: 1,
-      connect_timeout: 3000,
-      write_timeout: 15000,
-      read_timeout: 15000,
+    {
+        name: sigmamidia-portal,
+        url: http://sigma-midia-portal:80,
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 15000,
+        read_timeout: 15000,
 
-      routes:
-        [
+        routes:
           # ==================================================================
-          # API DAS APLICACOES — o unico caminho publicado
+          # ADMIN — alvo clássico
           # ==================================================================
-          # Limite por IP, bruto. O limite POR APLICACAO e a cota, que vive no
-          # Postgres do servico: so ele sabe de quem e a chave.
-          {
-              name: sigmamidia-api-v1,
-              paths: [ "/api/v1" ],
-              strip_path: false,
-              preserve_host: true,
-              plugins:
-                [
-                  {
-                      name: rate-limiting,
-                      config: { minute: 600, policy: local, fault_tolerant: true }
-                    }
-                ],
-              hosts: [ sigma-midia.cursodetecnologia.dev.br ]
-            }
-
-          # ==================================================================
-          # /api/admin/** FICA DE FORA, e nao por esquecimento
-          # ==================================================================
-          # O portal ainda nao tem login de operador. Publicar a rota de admin
-          # daria a qualquer um na internet o poder de aprovar a propria
-          # aplicacao e emitir chave para ela.
+          # A autorização é do APP: senha BCrypt, sessão opaca no banco e
+          # bloqueio por tentativas. Na borda fica só o limite apertado, porque
+          # é aqui que alguém tentaria adivinhar senha.
           #
-          # Enquanto nao houver autenticacao de pessoa, o admin so e alcancavel
-          # pela rede interna. Este comentario e a trava: rota nova aqui e
-          # decisao consciente.
-          # ==================================================================
-        ],
+          # SEM `ip-restriction`, de propósito: ela bloquearia o próprio dono
+          # acessando de um IP residencial — foi exatamente o que aconteceu no
+          # Urupix quando o IP real do visitante passou a ser repassado.
+          [
+            {
+                name: sigmamidia-admin,
+                paths: [ "/api/admin" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-midia.cursodetecnologia.dev.br ]
+              },
 
-      plugins:
-        [
-          {
-              # 1 MB. Por este caminho so passa JSON de controle -- pedir
-              # autorizacao, confirmar, consultar. O arquivo vai direto ao
-              # motor, por URL assinada.
-              name: request-size-limiting,
-              config: { allowed_payload_size: 1, size_unit: megabytes }
-            },
-          {
-              name: prometheus,
-              config: { status_code_metrics: true, latency_metrics: true }
-            }
-        ]
-    }
+            # ==================================================================
+          # PORTAL PÚBLICO — formulário preenchido por gente
+          # ==================================================================
+          # Limite baixo pelo mesmo motivo do admin: aqui moram o login do
+          # desenvolvedor e o reenvio de confirmação. Sem teto, o reenvio
+          # viraria uma máquina de mandar e-mail para terceiros a partir do
+          # nosso domínio — e quem paga a reputação do remetente somos nós.
+            {
+                name: sigmamidia-portal-api,
+                paths: [ "/api/portal" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-midia.cursodetecnologia.dev.br ]
+              },
+
+            # ==================================================================
+          # PÁGINAS
+          # ==================================================================
+          # Não há rota separada para assets, ao contrário do sigma-financeiro
+          # (que tem `/_next`). O Angular emite os arquivos na RAIZ, com hash no
+          # nome — não existe prefixo comum para casar. O teto aqui já contempla
+          # os pedidos de bundle de uma visita.
+            {
+                name: sigmamidia-raiz,
+                paths: [ "/" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ sigma-midia.cursodetecnologia.dev.br ]
+              }
+          ],
+
+        plugins:
+          [
+            {
+                name: request-size-limiting,
+                config: { allowed_payload_size: 1, size_unit: megabytes }
+              },
+            {
+                name: correlation-id,
+                config: { header_name: X-Request-Id, generator: uuid#counter, echo_downstream: true }
+              },
+            {
+                name: prometheus,
+                config: { status_code_metrics: true, latency_metrics: true }
+              }
+          ]
+      }
   ]

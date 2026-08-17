@@ -78,7 +78,17 @@ const PROJETOS = [
   {
     id: "plataforma",
     config: "cafe-mobile-erp/kong/kong.yml",
-    hosts: ["cafe-api.cursodetecnologia.dev.br"],
+    // DOIS domínios públicos. `opuschat` é o nome de produto; `cafe-api` é o
+    // histórico, e continua atendendo porque há cliente integrado nele.
+    //
+    // 🐞 Estava só o `cafe-api` aqui, e o `opuschat` fora — presente apenas no
+    // `kong/kong.yml` GERADO, adicionado à mão. Rodar o gerador o tirava de 11
+    // rotas de uma vez e derrubava o domínio inteiro, sem erro nenhum: as
+    // rotas continuariam válidas, só não responderiam por aquele host.
+    hosts: [
+      "opuschat.cursodetecnologia.dev.br",
+      "cafe-api.cursodetecnologia.dev.br",
+    ],
     // Operação da casa: não responde pelo domínio público, só pelo apelido
     // interno. `/v1/platform` enxerga TODOS os clientes e `/painel` é a tela
     // que a consome. Ver `rotasInternas` abaixo.
@@ -99,6 +109,14 @@ const PROJETOS = [
     config: "sigma-payments/infra/kong/kong.yml",
     hosts: ["sigma-payments.interno"],
     redes: [],
+  },
+  {
+    id: "sigmamidia",
+    config: "sigma-midia/deploy/kong/kong.yml",
+    hosts: ["sigma-midia.cursodetecnologia.dev.br"],
+    // A API e o nginx do portal são containers diferentes, e o gateway
+    // precisa alcançar os dois. Ambos vivem em `sigma-midia_default`.
+    redes: ["sigma-midia_default"],
   },
 ];
 
