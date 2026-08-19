@@ -72,6 +72,44 @@ para HMG faria **evento de dinheiro real chegar no ambiente de teste**.
 A regra é a que já vale na casa: **HMG só fala com sandbox.** Webhook de
 produção continua indo para PRD, e HMG registra o webhook da conta sandbox.
 
+### 3b. ⚠️ "Corte" NÃO é desligar aqui — e é aí que mora uma armadilha
+
+Vale desfazer uma ambiguidade da palavra. **Cortar** é redirecionar as rotas do
+Kong e do túnel para a remota. **As aplicações locais continuam de pé**, porque
+são elas que viram o HMG. Nada é apagado.
+
+Mas há um detalhe que morde, e ele foi medido em 19/08/2026: **as duas
+instâncias do sigma-midia anunciam hoje o MESMO endereço público.**
+
+```
+local   MIDIA_S3_ENDPOINT_PUBLICO = https://sigma-midia-arquivos.cursodetecnologia.dev.br
+remota  MIDIA_S3_ENDPOINT_PUBLICO = https://sigma-midia-arquivos.cursodetecnologia.dev.br
+```
+
+Isso estava **certo** durante a migração — é a mesma instalação mudando de casa,
+e divergir teria quebrado as URLs já publicadas. Deixa de estar certo no
+instante em que aquele hostname passa a apontar para a remota:
+
+- alguém envia um arquivo no **HMG** → o objeto cai no MinIO **local**;
+- o HMG devolve uma URL apontando para o hostname de **produção**;
+- o navegador busca na **remota**, que não tem aquele objeto → **404**.
+
+E o inverso, pior: como a chave e o sal do imgproxy são **os mesmos**, uma URL
+assinada no HMG **é válida em produção**. O ambiente frouxo consegue assinar
+caminhos que o acervo de produção aceita.
+
+**A consequência prática para o dia do corte:** assim que as rotas mudarem, a
+instância local tem que ser **reconfigurada ou parada**. Meio configurada é o
+pior dos três estados — ela emite URL errada e ninguém percebe, porque a
+resposta é um 404 de imagem, não um erro de sistema.
+
+A ordem certa, no mesmo dia:
+
+1. redirecionar as rotas para a remota;
+2. **parar** a instância local (é o passo que evita o estado intermediário);
+3. reconfigurá-la como HMG — hostname `-hmg`, chave e sal **novos**;
+4. subir de volta e registrar os hostnames `-hmg`.
+
 ### 4. As URLs assinadas do sigma-midia — os segredos precisam DIVERGIR ⚠️
 
 Na migração de 19/08/2026 eu **preservei** a chave e o sal do imgproxy e a

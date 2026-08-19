@@ -97,9 +97,13 @@ O corte em si é rápido e reversível:
 **Fazer isso na madrugada**, e com o Urupix avisado — é quando ele tem menos
 audiência ao vivo.
 
-### Fase 5 — esta máquina é liberada, e vira HMG
+### Fase 5 — esta máquina vira HMG
 
-Desliga o Kong e o túnel daqui.
+Desliga o Kong e o túnel daqui — **e só eles**.
+
+⚠️ **"Cortar" não é desligar as aplicações daqui.** É redirecionar as rotas. As
+aplicações locais continuam de pé, porque são elas que viram o HMG. Nada é
+apagado.
 
 Decidido em 19/08/2026: em vez de virar só estação de trabalho, ela passa a ser
 o **ambiente de homologação**, com os mesmos hostnames mais o sufixo `-hmg`
@@ -171,4 +175,4 @@ estavel evita ter que reinstalar depois.
 - [ ] Fase 2 — Jenkins construindo as imagens
 - [ ] Fase 3 — sigma-midia migrado
 - [ ] Fase 4 — Kong e túnel mudam de casa
-- [ ] Fase 5 — esta máquina liberada
+- [ ] Fase 5 — esta máquina vira HMG (as aplicações FICAM; só o Kong e o túnel saem)
