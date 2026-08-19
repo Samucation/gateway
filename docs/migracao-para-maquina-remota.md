@@ -97,9 +97,22 @@ O corte em si é rápido e reversível:
 **Fazer isso na madrugada**, e com o Urupix avisado — é quando ele tem menos
 audiência ao vivo.
 
-### Fase 5 — esta máquina é liberada
+### Fase 5 — esta máquina é liberada, e vira HMG
 
-Desliga o Kong e o túnel daqui. Vira estação de trabalho.
+Desliga o Kong e o túnel daqui.
+
+Decidido em 19/08/2026: em vez de virar só estação de trabalho, ela passa a ser
+o **ambiente de homologação**, com os mesmos hostnames mais o sufixo `-hmg`
+(`sigma-midia-hmg`, `urupix-hmg`…). A remota fica com os nomes de hoje e é PRD.
+
+⚠️ **A direção importa.** PRD ficando com os nomes atuais significa que nada
+registrado em terceiro precisa ser mexido para produção continuar funcionando.
+O risco fica todo do lado de HMG, que é onde ele é barato.
+
+O que HMG perde (OAuth do Mercado Pago é o caso sério: a URL de redirecionamento
+é **uma só por aplicação**, e servir sob outro nome faz o MP recusar TODA
+conexão — já aconteceu em julho de 2026) está levantado, item a item, em
+[`inversao-prd-hmg.md`](inversao-prd-hmg.md).
 
 ---
 
