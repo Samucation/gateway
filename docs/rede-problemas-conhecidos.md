@@ -140,6 +140,81 @@ E atualizar o `server:` no `~/.kube/config` para o IP novo.
 
 ---
 
+## 5b. ACONTECEU: o certificado do kubelet ficou com o IP antigo
+
+**Confirmado em 19/08/2026**, e antes do previsto — foi a troca de NAT para
+ponte que disparou, nao a de Wi-Fi para cabo. A causa e a mesma: **o IP mudou
+depois da instalacao**.
+
+**Sintoma.** Tudo parece bem (`kubectl get pods` funciona, os Pods sobem), mas
+qualquer comando que fale com o **kubelet** falha:
+
+```
+kubectl exec -n veltrixa veltrixa-postgres-0 -- psql ...
+  error: tls: failed to verify certificate:
+  x509: certificate is valid for 192.168.138.129, not 192.168.15.54
+```
+
+Afeta `exec`, `logs -f`, `port-forward` e `top` — tudo que passa pela porta
+10250. E confunde porque **o resto do cluster funciona**: o certificado do API
+server o MicroK8s renova sozinho; o do kubelet, nao.
+
+**Diagnostico — qual certificado ficou para tras:**
+
+```bash
+for c in /var/snap/microk8s/current/certs/*.crt; do
+  ips=$(sudo openssl x509 -in "$c" -noout -text | grep -o "IP Address:[0-9.]*" | tr "
+" " ")
+  echo "$(basename $c): $ips"
+done
+```
+
+⚠️ `microk8s refresh-certs` **nao serve**: ele so aceita `ca.crt`,
+`server.crt` e `front-proxy-client.crt`. O do kubelet e reemitido a mao.
+
+**Conserto** (guarde o antigo antes):
+
+```bash
+C=/var/snap/microk8s/current/certs
+sudo cp $C/kubelet.crt $C/kubelet.crt.bak
+IP=$(hostname -I | awk '{print $1}')
+
+sudo bash -c "cat > /tmp/kubelet-csr.conf <<EOF
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+req_extensions = req_ext
+distinguished_name = dn
+[dn]
+CN = 127.0.0.1
+[req_ext]
+subjectAltName = @alt
+[alt]
+DNS.1 = $(hostname)
+DNS.2 = localhost
+IP.1 = 127.0.0.1
+IP.2 = $IP
+EOF"
+
+sudo openssl req -new -key $C/kubelet.key -out /tmp/kubelet.csr -config /tmp/kubelet-csr.conf
+sudo openssl x509 -req -in /tmp/kubelet.csr -CA $C/ca.crt -CAkey $C/ca.key -CAcreateserial   -out $C/kubelet.crt -days 3650 -extensions req_ext -extfile /tmp/kubelet-csr.conf
+
+sudo microk8s stop && sudo microk8s start
+```
+
+**O detalhe que evita a proxima vez:** incluir o **nome da maquina**
+(`DNS.1 = $(hostname)`) no certificado. Com o nome dentro, trocar o IP deixa de
+invalidar — e foi por isso que o conserto acima poe `serverhomol` junto.
+
+Conferir o que o kubelet REALMENTE serve (nao o que esta no arquivo):
+
+```bash
+echo | openssl s_client -connect <IP>:10250 2>/dev/null | openssl x509 -noout -text | grep -A1 Alternative
+```
+
+---
+
 ## 6. TTL diz qual sistema respondeu
 
 Conferência barata, antes de qualquer conexão:
