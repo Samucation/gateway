@@ -126,6 +126,19 @@ Docker. São camadas diferentes, e não concorrentes.
 
 ---
 
+## Problemas de rede
+
+O ambiente e rede domestica com maquina virtual, notebook que dorme e IP por
+DHCP. Os problemas ja encontrados e os previstos estao catalogados em
+[`rede-problemas-conhecidos.md`](rede-problemas-conhecidos.md) -- com sintoma,
+causa e conserto.
+
+O mais importante para a Fase 1: **trocar Wi-Fi por cabo MUDA o IP da VM**, e o
+k3s carimba o IP no certificado TLS dele. Instalar com `--tls-san` e um nome
+estavel evita ter que reinstalar depois.
+
+---
+
 ## Riscos registrados
 
 | Risco | Quando aparece | Como reduzir |
