@@ -28,11 +28,56 @@
 #
 # NAO colhe as metricas das APLICACOES. Medido: `/actuator/prometheus` do
 # Veltrixa devolve 401 -- ele so e liberado por um interruptor de
-# desenvolvimento. Para cada aplicacao entrar, ela precisa liberar a rota e
-# ganhar a anotacao `prometheus.io/scrape`.
+# desenvolvimento.
 #
 # Isso e trabalho POR PROJETO e nao foi feito: liberar rota de metrica muda a
-# superficie exposta de cada um, e merece ser decidido em cada um.
+# superficie exposta de cada um, e merece ser decidido em cada um. Hoje so as
+# aplicacoes Spring tem o que colher; as de Node (opuschat, urupix,
+# sprinklegames, portal do central-ia) nao expoem metrica nenhuma, entao para
+# elas nao ha o que ligar antes de haver o que medir.
+#
+# ---------------------------------------------------------------------------
+# 🐞 E NAO E POR ANOTACAO. Esta nota dizia `prometheus.io/scrape`, e ERRAVA
+# ---------------------------------------------------------------------------
+# `prometheus.io/scrape` e a convencao do Prometheus instalado a mao, onde
+# alguem escreve o `kubernetes_sd_config` e as regras de relabel que leem a
+# anotacao. O kube-prometheus-stack NAO traz essas regras: ele descobre alvo
+# por CRD, com um `ServiceMonitor` (ou `PodMonitor`) por aplicacao.
+#
+# Anotar os Pods aqui seria pior que nao fazer nada -- os manifestos ficariam
+# com cara de instrumentados, o Grafana continuaria sem os dados, e ninguem
+# ligaria uma coisa na outra.
+#
+# ⚠️ E ha uma segunda armadilha, ainda mais calada. O grafico do Helm liga
+# `serviceMonitorSelectorNilUsesHelmValues`, que faz o Prometheus aceitar SO os
+# ServiceMonitor que tenham o rotulo do release dele. Sem o rotulo o objeto e
+# criado com sucesso, aparece no `kubectl get servicemonitor`, e e ignorado --
+# nao ha erro, nao ha evento, e o alvo simplesmente nunca aparece.
+#
+# O release aqui e `kube-prom-stack` (deduzido do nome dos Services abaixo).
+# Confirme antes de usar, e um comando:
+#
+#     microk8s kubectl get prometheus -n observability \
+#       -o jsonpath='{.items[0].spec.serviceMonitorSelector}'; echo
+#
+# Entao o molde e:
+#
+#     apiVersion: monitoring.coreos.com/v1
+#     kind: ServiceMonitor
+#     metadata:
+#       name: veltrixa-api
+#       namespace: veltrixa
+#       labels:
+#         release: kube-prom-stack     # <- sem isto, ignorado em silencio
+#     spec:
+#       selector:
+#         matchLabels: { app: veltrixa-api }
+#       endpoints:
+#         - port: http                 # o NOME da porta no Service, nao o numero
+#           path: /actuator/prometheus
+#
+# Depois de aplicar, a prova nao e o `kubectl get`: e o alvo aparecer em
+# prometheus.hmg/targets com estado `up`.
 # ===========================================================================
 apiVersion: networking.k8s.io/v1
 kind: Ingress
