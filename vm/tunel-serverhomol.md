@@ -96,6 +96,39 @@ distinguiam pelo `WWW-Authenticate`: `realm="Jenkins"` (nginx) contra
 o nginx continuava escutando em `0.0.0.0:80` com os processos antigos. Só o
 `restart` fechou.
 
+**4. 🐞 A URL raiz do Jenkins ficou apontando para o endereço antigo — e o
+sintoma foi "não consigo logar".**
+
+`jenkins.model.JenkinsLocationConfiguration.xml` guardava
+`http://192.168.15.54:8080/` — endereço errado (`.54` é o notebook, a VM é
+`.55`), em `http`, e que deixou de responder quando fechei o `bind`.
+
+O Jenkins **validava a senha corretamente** e então mandava o navegador para
+aquele endereço morto. Da cadeira de quem usa, isso é indistinguível de senha
+recusada — e leva a pessoa a duvidar da própria senha, que é o pior lugar para
+procurar.
+
+Corrigido para `https://jenkins.cursodetecnologia.dev.br/`. Depois disso o POST
+de login redireciona para `/loginError` — **relativo**, no próprio domínio.
+
+⚠️ **Sempre que o endereço de acesso do Jenkins mudar, este arquivo tem que
+mudar junto.** Ele não é derivado da requisição; é configuração, e envelhece
+calado.
+
+---
+
+## Duas senhas, e elas são de camadas diferentes
+
+Isto confunde, e vale ter escrito:
+
+| Ordem | Quem pergunta | Usuário | O que é |
+|---|---|---|---|
+| 1ª | **nginx** (caixa do navegador) | `samuel` | a barreira que criei, para o mundo não chegar no Jenkins |
+| 2ª | **Jenkins** (página com formulário) | `samuca` ou `marcia` | a conta de verdade, que já existia |
+
+Digitar a conta do Jenkins na **primeira** caixa não funciona: o nginx não a
+conhece, e o navegador só repergunta — parecendo login recusado.
+
 ---
 
 ### ~~1. Criar a aplicação no Zero Trust~~ *(não foi este o caminho)*
