@@ -45,7 +45,60 @@ Access abriria uma janela — de minutos ou de dias — com a tela de login do
 Jenkins exposta na internet, e essa janela é exatamente o que varredores
 automáticos encontram.
 
-### 1. Criar a aplicação no Zero Trust *(precisa da sua conta)*
+### ✅ RESOLVIDO por nginx com senha, e não por Cloudflare Access
+
+**O Access foi descartado por custo de cadastro.** A tela de plano do Zero
+Trust pede **cartão de crédito** mesmo no Free (`Due today $0/month`, com o
+cartão arquivado). É genuinamente grátis para 1 assento de 50 — mas não vale
+cadastrar cartão por um CI de casa.
+
+No lugar dele: **nginx com autenticação básica** na VM, dentro do túnel que já
+existia. O que se queria é concreto — que varredor automático não ache uma tela
+de login de CI exposta — e uma senha antes da aplicação resolve isso.
+
+```
+internet → Cloudflare → túnel → nginx :8081 (SENHA) → Jenkins :8080
+```
+
+| | |
+|---|---|
+| Usuário | `samuel` |
+| Senha | gerada com `openssl rand`, hash **bcrypt** em `/etc/nginx/jenkins.htpasswd` |
+| nginx escuta | **só** `127.0.0.1:8081` |
+| Jenkins escuta | **só** `127.0.0.1:8080` |
+
+**Provado pela internet:** sem senha → `401` com página genérica do nginx, que
+**não revela que há Jenkins atrás**. Com senha → `200`, `<title>Sign in -
+Jenkins</title>`.
+
+⚠️ **`http://192.168.15.55:8080` não responde mais**, nem de dentro de casa.
+Se precisar sem passar pelo túnel:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 usuario@192.168.15.55
+```
+
+#### 🐞 Três armadilhas que essa montagem cobrou
+
+**1. O nginx repassa o `Authorization` para cima.** Com a senha correta o
+Jenkins devolvia `401` assim mesmo: ele recebia o cabeçalho e tentava
+autenticar `samuel` como usuário *dele*. A senha era lida duas vezes, por dois
+sistemas diferentes, e o segundo não a conhece. Resolve com
+`proxy_set_header Authorization "";` — a barreira do nginx já cumpriu o papel,
+e daqui para cima a requisição tem que subir limpa.
+
+**2. Dois `401` parecendo o mesmo.** O do nginx e o do Jenkins só se
+distinguiam pelo `WWW-Authenticate`: `realm="Jenkins"` (nginx) contra
+`realm="Jenkins", charset="UTF-8"` (Jenkins). Batizar o realm do nginx de
+"Jenkins" foi erro meu; hoje ele é `serverhomol - acesso externo`.
+
+**3. `systemctl reload` não derruba socket.** Depois de remover o site padrão,
+o nginx continuava escutando em `0.0.0.0:80` com os processos antigos. Só o
+`restart` fechou.
+
+---
+
+### ~~1. Criar a aplicação no Zero Trust~~ *(não foi este o caminho)*
 
 **one.dash.cloudflare.com → Access → Applications → Add an application →
 Self-hosted**
