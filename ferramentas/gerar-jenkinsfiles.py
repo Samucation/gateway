@@ -77,6 +77,11 @@ PROJETOS = [
          # credencial -- um deploy que abrisse a API passaria em todo o resto.
          checa=[('urupix.hmg', '/', '200')]),
 
+    dict(dir='sprinklegames-portal', ns='sprinklegames',
+         imagens=[('sprinklegames-portal', '-t {REG}/sprinklegames-portal:$TAG .')],
+         deploys=['sprinklegames-portal'],
+         checa=[('sprinklegames.hmg', '/', '200')]),
+
     dict(dir='sigma-payments', ns='sigma-payments',
          imagens=[('sigma-payments', '-t {REG}/sigma-payments:$TAG .'),
                   ('sigma-payments-ops-api', '-f Dockerfile.ops-api -t {REG}/sigma-payments-ops-api:$TAG .'),

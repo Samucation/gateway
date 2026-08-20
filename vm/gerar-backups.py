@@ -53,6 +53,9 @@ NAMESPACES = [
         dict(pod='sigma-payments-postgres-0', user='sigma', db='sigma_payments', chave='POSTGRES_PASSWORD', arq='payments.dump'),
         dict(pod='sigma-payments-postgres-0', user='sigma', db='sigma_ops',      chave='POSTGRES_PASSWORD', arq='ops.dump'),
     ]),
+    dict(ns='sprinklegames', hora='30 6 * * *', secret='sprinklegames-secrets', bancos=[
+        dict(pod='sprinklegames-postgres-0', user='sprinkle', db='sprinklegames', chave='POSTGRES_PASSWORD', arq='app.dump'),
+    ]),
     dict(ns='urupix', hora='0 6 * * *', secret='urupix-secrets', bancos=[
         dict(pod='urupix-postgres-0', user='liveflow', db='liveflow', chave='POSTGRES_PASSWORD', arq='app.dump'),
     ]),
