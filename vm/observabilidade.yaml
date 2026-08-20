@@ -1,0 +1,71 @@
+# ===========================================================================
+# A entrada da observabilidade, e o apelido que liga os projetos a ela.
+#
+# ---------------------------------------------------------------------------
+# UMA PILHA, NAO UMA POR PROJETO
+# ---------------------------------------------------------------------------
+# O `docker-compose` do sigma-payments trazia Prometheus, Grafana, Loki,
+# Promtail e Jaeger proprios. Cada projeto que fizesse igual teria os seus.
+#
+# Cinco copias de Prometheus, uma por namespace, seria desperdicio de memoria
+# e -- pior -- cinco lugares para olhar quando algo desse errado. No dia de um
+# incidente, "em qual Grafana eu vejo isso?" e uma pergunta que ninguem deveria
+# precisar fazer.
+#
+# A pilha vem do complemento `observability` do MicroK8s (kube-prometheus-stack
+# + Loki + Tempo). Usar o que a plataforma mantem e melhor que montar a mao:
+# ela ja traz `kube-state-metrics` e `node-exporter` configurados, e as
+# atualizacoes vem junto.
+#
+# Custo medido em 20/08/2026: 1,1 GB de memoria para os 9 Pods -- menos que os
+# 2 a 3 GB que a documentacao sugere.
+#
+# ---------------------------------------------------------------------------
+# ⚠️ O QUE ELE COLHE HOJE, E O QUE FALTA
+# ---------------------------------------------------------------------------
+# Colhe o CLUSTER: uso de CPU e memoria por Pod, reinicios, estado, disco, no.
+# E isso ja e a maior parte do que se quer olhar quando algo vai mal.
+#
+# NAO colhe as metricas das APLICACOES. Medido: `/actuator/prometheus` do
+# Veltrixa devolve 401 -- ele so e liberado por um interruptor de
+# desenvolvimento. Para cada aplicacao entrar, ela precisa liberar a rota e
+# ganhar a anotacao `prometheus.io/scrape`.
+#
+# Isso e trabalho POR PROJETO e nao foi feito: liberar rota de metrica muda a
+# superficie exposta de cada um, e merece ser decidido em cada um.
+# ===========================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: observabilidade
+  namespace: observability
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: grafana.hmg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kube-prom-stack-grafana
+                port:
+                  number: 80
+
+    # ⚠️ O Prometheus tem hostname PROPRIO, e nao um caminho dentro do Grafana.
+    #
+    # Servi-lo sob `/prometheus` exigiria dizer a ele que ele vive num
+    # subcaminho (`--web.external-url`), senao os redirecionamentos dele saem
+    # sem o prefixo e a interface quebra em paginas soltas. Hostname proprio
+    # custa uma linha no `hosts` e evita esse tipo inteiro de problema.
+    - host: prometheus.hmg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kube-prom-stack-kube-prome-prometheus
+                port:
+                  number: 9090
