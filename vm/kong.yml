@@ -1,0 +1,1697 @@
+# GERADO por vm/gerar-kong-vm.mjs a partir de ../kong/kong.yml — NAO editar.
+#
+# Este e o Kong que roda DENTRO do cluster da maquina remota. A unica
+# diferenca para o da estacao e o destino de cada service: nome de container
+# Docker virou nome de Service do Kubernetes.
+#
+# Para mudar uma rota, mude no kong.yml do PROJETO, rode scripts/gerar-kong.mjs
+# e depois este. Editar aqui faz a mudanca sumir na proxima geracao.
+_format_version: "3.0"
+_transform: true
+plugins: []
+services:
+  - name: liveflow-sse
+    url: http://urupix-app.urupix.svc.cluster.local:3100
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 3600000
+    read_timeout: 3600000
+    routes:
+      - name: liveflow-overlay-streams
+        paths:
+          - /api/overlay/stream
+          - /api/overlay/goal-stream
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://urupix.com.br
+            - https://urupix.cursodetecnologia.dev.br
+            - http://localhost:3100
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - Idempotency-Key
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 12
+          size_unit: megabytes
+  - name: liveflow-app
+    url: http://urupix-app.urupix.svc.cluster.local:3100
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: liveflow-webhooks
+        paths:
+          - /api/webhooks
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-payments-health
+        paths:
+          - /api/payments/health
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: liveflow-payments-oauth
+        paths:
+          - /api/payments/oauth
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-payments-api
+        paths:
+          - /api/payments/v1
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 30000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-payments-docs
+        paths:
+          - /api/payments/docs
+          - /api/payments/openapi
+          - /payments-docs
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: liveflow-admin
+        paths:
+          - /admin
+          - /api/admin
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-assets
+        paths:
+          - /_next
+          - /urupix
+          - /login-bg
+          - /consoles
+          - /store
+          - /vozes
+          - /favicon.ico
+          - /icon.png
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-donate-page
+        paths:
+          - /d
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-urupix-api
+        paths:
+          - /api/urupix
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-dashboard
+        paths:
+          - /dashboard
+          - /api/analytics
+          - /api/reports
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-overlay-pages
+        paths:
+          - /overlay
+          - /api/overlay
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 2400
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-auth
+        paths:
+          - /login
+          - /2fa
+          - /api/auth
+          - /api/2fa
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-dev-portal
+        paths:
+          - /developers
+          - /api/developers
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+      - name: liveflow-app-default
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - urupix.com.br
+          - www.urupix.com.br
+          - urupix.cursodetecnologia.dev.br
+          - urupix.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://urupix.com.br
+            - https://urupix.cursodetecnologia.dev.br
+            - http://localhost:3100
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - Idempotency-Key
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 12
+          size_unit: megabytes
+  - name: sigmafin-sigma-app
+    url: http://sigma-financeiro.sigma-financeiro.svc.cluster.local:3200
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: sigmafin-webhooks-adquirentes
+        paths:
+          - /api/webhooks
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-api-v1
+        paths:
+          - /api/v1
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+          - POST
+          - PATCH
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              hour: 40000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-cron
+        paths:
+          - /api/cron
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: ip-restriction
+            config:
+              allow:
+                - 127.0.0.1
+                - ::1
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+        hosts:
+          - sigma.interno
+      - name: sigmafin-admin
+        paths:
+          - /admin
+          - /api/admin
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-portal
+        paths:
+          - /portal
+          - /api/portal
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-assets
+        paths:
+          - /_next
+          - /favicon.ico
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-raiz
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+      - name: sigmafin-cron-bloqueio-publico
+        hosts:
+          - sigma-financeiro.cursodetecnologia.dev.br
+        paths:
+          - /api/cron
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              message: Not Found
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+      - name: cors
+        config:
+          origins:
+            - https://sigma.invalido
+          methods:
+            - GET
+            - POST
+            - PATCH
+            - OPTIONS
+          headers:
+            - Authorization
+            - Content-Type
+            - X-Sigma-Token
+          credentials: false
+          max_age: 3600
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 4
+          size_unit: megabytes
+  - name: plataforma-api
+    url: http://plataforma-app.plataforma.svc.cluster.local:8080
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    retries: 2
+    routes:
+      - name: plataforma-api-mensageria
+        paths:
+          - /v1/messaging
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 20000
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+              hide_client_headers: false
+          - name: cors
+            config:
+              origins:
+                - http://localhost:8000
+                - http://localhost:8080
+              methods:
+                - GET
+                - POST
+                - PUT
+                - DELETE
+                - OPTIONS
+              headers:
+                - Authorization
+                - Content-Type
+                - Idempotency-Key
+                - X-Client-Name
+                - X-Request-Id
+              exposed_headers:
+                - X-Request-Id
+                - RateLimit-Remaining
+              credentials: false
+              max_age: 3600
+          - name: response-transformer
+            config:
+              add:
+                headers:
+                  - "Content-Security-Policy: default-src 'none';
+                    frame-ancestors 'none'"
+                  - "X-Content-Type-Options: nosniff"
+              remove:
+                headers:
+                  - X-Powered-By
+                  - Server
+      - name: plataforma-api-operador
+        paths:
+          - /v1/platform
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        hosts:
+          - cafe.interno
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+          - name: ip-restriction
+            config:
+              allow:
+                - 127.0.0.1/32
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+              status: 404
+              message: Not Found
+      - name: plataforma-api-porta-de-entrada
+        paths:
+          - /v1/signup
+          - /v1/login
+        strip_path: false
+        methods:
+          - POST
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 10
+              hour: 60
+              policy: local
+              limit_by: ip
+              fault_tolerant: false
+      - name: plataforma-api-mesa-do-atendente
+        paths:
+          - /v1/atendimento
+          - /v1/ramo
+          - /v1/profissionais
+          - /v1/equipe
+          - /v1/painel
+          - /v1/configuracoes
+          - /v1/convite
+          - /v1/planos
+          - /v1/pagamentos
+          - /v1/senha
+          - /v1/eu
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              limit_by: header
+              header_name: Authorization
+              minute: 3000
+              policy: local
+              fault_tolerant: true
+          - name: cors
+            config:
+              origins:
+                - http://localhost:8020
+                - http://localhost:8080
+              methods:
+                - GET
+                - POST
+                - PUT
+                - OPTIONS
+              headers:
+                - Authorization
+                - Content-Type
+                - X-Request-Id
+              credentials: false
+              max_age: 3600
+      - name: plataforma-api-marketing
+        paths:
+          - /v1/marketing
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              hour: 600
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+      - name: plataforma-api-atendimento-da-casa
+        paths:
+          - /v1/atendimento/concluido
+        strip_path: false
+        methods:
+          - POST
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+      - name: plataforma-api-operador-bloqueio-publico
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        paths:
+          - /v1/platform
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              message: Not Found
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+  - name: plataforma-webhooks
+    url: http://plataforma-app.plataforma.svc.cluster.local:8080
+    connect_timeout: 5000
+    write_timeout: 15000
+    read_timeout: 15000
+    retries: 0
+    routes:
+      - name: plataforma-webhooks-provedores
+        paths:
+          - ~/v1/messaging/webhooks/.*
+        strip_path: false
+        methods:
+          - GET
+          - POST
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+  - name: plataforma-web
+    url: http://plataforma-app.plataforma.svc.cluster.local:8080
+    connect_timeout: 5000
+    read_timeout: 15000
+    routes:
+      - name: plataforma-web-checkout
+        paths:
+          - /planos
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+          - name: response-transformer
+            config:
+              remove:
+                headers:
+                  - Content-Security-Policy
+              add:
+                headers:
+                  - "Content-Security-Policy: default-src 'self'; script-src
+                    'self' 'unsafe-inline' https://sdk.mercadopago.com
+                    https://http2.mlstatic.com; style-src 'self'
+                    'unsafe-inline'; img-src 'self' data:
+                    https://http2.mlstatic.com; font-src 'self'; connect-src
+                    'self' https://api.mercadopago.com
+                    https://api.mercadolibre.com; frame-src
+                    https://sdk.mercadopago.com https://www.mercadopago.com;
+                    object-src 'none'; base-uri 'self'; form-action 'self';
+                    frame-ancestors 'none'"
+      - name: plataforma-web-publico
+        paths:
+          - /
+          - /inicio
+          - /portal
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: plataforma-web-painel
+        paths:
+          - /painel
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - cafe.interno
+        plugins:
+          - name: ip-restriction
+            config:
+              allow:
+                - 127.0.0.1/32
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+              status: 404
+              message: Not Found
+      - name: plataforma-web-docs
+        paths:
+          - /docs
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        plugins:
+          - name: response-transformer
+            config:
+              replace:
+                headers:
+                  - "X-Frame-Options: DENY"
+              add:
+                headers:
+                  - "X-Content-Type-Options: nosniff"
+                  - "Referrer-Policy: same-origin"
+                  - "Content-Security-Policy: default-src 'self'; script-src
+                    'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+                    img-src 'self' data:; font-src 'self' data:; connect-src
+                    'self'; object-src 'none'; base-uri 'self'; form-action
+                    'self'; frame-ancestors 'none'"
+                  - "Permissions-Policy: camera=(), microphone=(),
+                    geolocation=()"
+              remove:
+                headers:
+                  - X-Powered-By
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: plataforma-web-painel-bloqueio-publico
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+          - cafe-api.cursodetecnologia.dev.br
+        paths:
+          - /painel
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              message: Not Found
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: same-origin"
+              - "Content-Security-Policy: default-src 'self'; script-src 'self'
+                'unsafe-inline' https://accounts.google.com; style-src 'self'
+                'unsafe-inline'; img-src 'self' data:; font-src 'self';
+                connect-src 'self' https://accounts.google.com; frame-src
+                https://accounts.google.com; object-src 'none'; base-uri 'self';
+                form-action 'self'; frame-ancestors 'none'"
+              - "Permissions-Policy: camera=(), microphone=(), geolocation=(),
+                payment=(), usb=()"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Powered-By
+              - Server
+  - name: central-transcricao
+    url: http://central-motor.central-ia.svc.cluster.local:3300
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: central-transcricoes
+        paths:
+          - /v1/audio/transcriptions
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              limit_by: header
+              header_name: authorization
+        hosts:
+          - central.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://central-ia.cursodetecnologia.dev.br
+            - https://central-ia-sandbox.cursodetecnologia.dev.br
+            - http://localhost:3301
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - X-Central-Destino
+            - X-Central-Cobrado
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Frame-Options: DENY"
+              - "Content-Security-Policy: default-src 'none'; frame-ancestors
+                'none'"
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: no-referrer"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 32
+          size_unit: megabytes
+  - name: central-voz
+    url: http://central-motor.central-ia.svc.cluster.local:3300
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 15000
+    read_timeout: 15000
+    routes:
+      - name: central-fala
+        paths:
+          - /v1/audio/speech
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: header
+              header_name: authorization
+        hosts:
+          - central.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://central-ia.cursodetecnologia.dev.br
+            - https://central-ia-sandbox.cursodetecnologia.dev.br
+            - http://localhost:3301
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - X-Central-Destino
+            - X-Central-Cobrado
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Frame-Options: DENY"
+              - "Content-Security-Policy: default-src 'none'; frame-ancestors
+                'none'"
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: no-referrer"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 32
+          size_unit: megabytes
+  - name: central-conversa
+    url: http://central-motor.central-ia.svc.cluster.local:3300
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: central-conversa
+        paths:
+          - /v1/chat/completions
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: true
+              limit_by: header
+              header_name: authorization
+        hosts:
+          - central.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://central-ia.cursodetecnologia.dev.br
+            - https://central-ia-sandbox.cursodetecnologia.dev.br
+            - http://localhost:3301
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - X-Central-Destino
+            - X-Central-Cobrado
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Frame-Options: DENY"
+              - "Content-Security-Policy: default-src 'none'; frame-ancestors
+                'none'"
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: no-referrer"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 32
+          size_unit: megabytes
+  - name: central-saude
+    url: http://central-motor.central-ia.svc.cluster.local:3300
+    retries: 1
+    connect_timeout: 2000
+    read_timeout: 5000
+    routes:
+      - name: central-saude
+        paths:
+          - /health
+          - /v1/uso
+        strip_path: false
+        preserve_host: true
+        methods:
+          - GET
+        hosts:
+          - central.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://central-ia.cursodetecnologia.dev.br
+            - https://central-ia-sandbox.cursodetecnologia.dev.br
+            - http://localhost:3301
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - X-Central-Destino
+            - X-Central-Cobrado
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Frame-Options: DENY"
+              - "Content-Security-Policy: default-src 'none'; frame-ancestors
+                'none'"
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: no-referrer"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 32
+          size_unit: megabytes
+  - name: central-portal
+    url: http://central-portal.central-ia.svc.cluster.local:3000
+    retries: 1
+    connect_timeout: 3000
+    read_timeout: 30000
+    routes:
+      - name: central-portal-entrada
+        paths:
+          - /portal/entrar
+          - /portal/criar-conta
+          - /portal/esqueci
+          - /api/portal
+          - /admin/entrar
+          - /api/admin/entrar
+          - /api/admin/dois-fatores
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+              limit_by: ip
+        hosts:
+          - central.interno
+      - name: central-portal-admin
+        paths:
+          - /admin
+          - /api/admin
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              limit_by: ip
+        hosts:
+          - central.interno
+      - name: central-portal-resto
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - central.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - https://central-ia.cursodetecnologia.dev.br
+            - https://central-ia-sandbox.cursodetecnologia.dev.br
+            - http://localhost:3301
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - X-Request-Id
+          exposed_headers:
+            - X-Request-Id
+            - Retry-After
+            - X-Central-Destino
+            - X-Central-Cobrado
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Frame-Options: DENY"
+              - "Content-Security-Policy: default-src 'none'; frame-ancestors
+                'none'"
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: no-referrer"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 32
+          size_unit: megabytes
+  - name: sigmapay-sigma-payments
+    url: http://sigma-payments-app:8080
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: sigmapay-webhooks
+        paths:
+          - /v1/webhooks
+        strip_path: false
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - sigma-payments.interno
+      - name: sigmapay-customers
+        paths:
+          - /v1/customers
+        strip_path: false
+        methods:
+          - GET
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 30000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-payments.interno
+      - name: sigmapay-charges
+        paths:
+          - /v1/charges
+        strip_path: false
+        methods:
+          - GET
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 30000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-payments.interno
+      - name: sigmapay-admin
+        paths:
+          - /v1/admin
+        strip_path: false
+        plugins:
+          - name: ip-restriction
+            config:
+              allow:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+                - 127.0.0.1/32
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+        hosts:
+          - sigma-payments.interno
+      - name: sigmapay-actuator-public
+        paths:
+          - /actuator/health
+          - /actuator/info
+        strip_path: false
+        methods:
+          - GET
+        hosts:
+          - sigma-payments.interno
+      - name: sigmapay-docs
+        paths:
+          - /swagger-ui
+          - /swagger-ui.html
+          - /v3/api-docs
+          - /webjars
+          - /openapi.yaml
+          - /openapi.yml
+        strip_path: false
+        methods:
+          - GET
+        hosts:
+          - sigma-payments.interno
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid
+          echo_downstream: true
+      - name: cors
+        config:
+          origins:
+            - http://localhost:3000
+            - http://localhost:5173
+            - https://*.veltora.com
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Authorization
+            - Content-Type
+            - Idempotency-Key
+            - X-Request-Id
+            - X-Signature
+          exposed_headers:
+            - Idempotency-Replay
+            - X-Request-Id
+            - X-RateLimit-Remaining
+            - Retry-After
+          credentials: true
+          max_age: 3600
+      - name: prometheus
+        config:
+          per_consumer: false
+          status_code_metrics: true
+          latency_metrics: true
+          bandwidth_metrics: true
+          upstream_health_metrics: true
+      - name: request-transformer
+        config:
+          remove:
+            headers:
+              - X-Consumer-Id
+              - X-Consumer-Username
+              - X-Credential-Identifier
+      - name: response-transformer
+        config:
+          remove:
+            headers:
+              - X-Kong-Upstream-Latency
+              - X-Kong-Proxy-Latency
+              - Via
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 4
+          size_unit: megabytes
+  - name: sigmamidia-sigma-midia
+    url: http://sigma-midia.sigma-midia.svc.cluster.local:3400
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 15000
+    read_timeout: 15000
+    routes:
+      - name: sigmamidia-api-v1
+        paths:
+          - /api/v1
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - sigma-midia.cursodetecnologia.dev.br
+    plugins:
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+  - name: sigmamidia-portal
+    url: http://sigma-midia-portal.sigma-midia.svc.cluster.local:80
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 15000
+    read_timeout: 15000
+    routes:
+      - name: sigmamidia-admin
+        paths:
+          - /api/admin
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-midia.cursodetecnologia.dev.br
+      - name: sigmamidia-portal-api
+        paths:
+          - /api/portal
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-midia.cursodetecnologia.dev.br
+      - name: sigmamidia-raiz
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+        hosts:
+          - sigma-midia.cursodetecnologia.dev.br
+    plugins:
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true

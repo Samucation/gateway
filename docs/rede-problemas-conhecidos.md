@@ -288,6 +288,39 @@ passo que depende do dono da rede.
 
 ---
 
+## 5d. Criar rede do Docker REINICIA o MicroK8s inteiro
+
+**Medido em 20/08/2026**, subindo o Kong em Docker na mesma máquina do cluster:
+
+```
+07:17:17  docker compose up  ->  cria a rede `vm_default`
+07:17:18  a ponte `br-7b1022c3e878` sobe
+07:17:22  systemd: Stopping snap.microk8s.daemon-kubelite   <- 4 segundos depois
+07:17:32  volta
+```
+
+Todos os Pods reiniciaram. Dois deles (`urupix-app`, `veltrixa-api`) ficaram em
+`CrashLoopBackOff` por alguns minutos, porque subiram antes dos bancos.
+
+**Causa.** O MicroK8s vigia mudanças nas interfaces de rede do host — ele
+precisa disso para reemitir certificado e reconfigurar quando o IP muda. Uma
+ponte nova do Docker dispara essa detecção, e ele se reinicia.
+
+**Por que isso importa mais do que parece.** Não é um susto isolado: significa
+que **todo `docker compose up` na máquina derruba o cluster por ~10 segundos**.
+Para um gateway que vai carregar produção, é inaceitável — reiniciar o gateway
+reiniciaria as aplicações atrás dele.
+
+⚠️ E vale para qualquer coisa que crie rede: um `docker compose` de teste, uma
+ferramenta que suba contêiner auxiliar. `docker build` **não** cria rede, então
+os builds do Jenkins são seguros.
+
+**Conserto.** Não rodar em Docker o que precisa conviver com o cluster. O Kong
+foi para dentro do cluster como Deployment — e de quebra ele passou a falar
+direto com os Services, sem o salto extra pelo Traefik.
+
+---
+
 ## 6. TTL diz qual sistema respondeu
 
 Conferência barata, antes de qualquer conexão:

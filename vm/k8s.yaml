@@ -1,0 +1,211 @@
+# ===========================================================================
+# O KONG, dentro do cluster.
+#
+# ---------------------------------------------------------------------------
+# 🐞 POR QUE NÃO EM DOCKER, QUE ERA O PLANO
+# ---------------------------------------------------------------------------
+# Medido em 20/08/2026, subindo o Kong em Docker ao lado do MicroK8s:
+#
+#     07:17:17  docker compose up -> cria a rede vm_default
+#     07:17:22  systemd: Stopping snap.microk8s.daemon-kubelite
+#
+# Quatro segundos. O MicroK8s vigia mudanças de interface — precisa disso para
+# reemitir certificado quando o IP muda — e uma ponte nova do Docker dispara a
+# detecção. Todos os Pods reiniciaram.
+#
+# Ou seja: cada `docker compose up` na máquina derrubaria o cluster. Para um
+# gateway de produção isso é inaceitável — reiniciar o gateway reiniciaria as
+# aplicações atrás dele.
+#
+# Dentro do cluster o problema some. E de quebra o Kong passa a falar DIRETO com
+# os Services: um salto a menos que passar pelo Traefik, e sem depender de
+# `preserve_host` para o roteamento funcionar.
+# ===========================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/part-of: gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  namespace: gateway
+  labels:
+    app: kong
+spec:
+  replicas: 1
+  # 🐞 `Recreate`, e NÃO RollingUpdate — por causa do `hostPort`.
+  #
+  # A primeira versão usava RollingUpdate com `maxUnavailable: 0`, achando que
+  # o gateway não podia ter janela sem ninguém atendendo. Isso trava:
+  #
+  #   Waiting for deployment "kong" rollout to finish:
+  #   1 old replicas are pending termination...
+  #
+  # Só UM Pod pode ocupar a porta 8050 do nó. O Pod novo fica `Pending`
+  # esperando a porta, e o antigo só sai quando o novo estiver pronto —
+  # impasse, e o rollout nunca termina.
+  #
+  # `Recreate` derruba antes de subir. O custo é uma janela de poucos segundos
+  # a cada atualização do gateway; com um nó só e `hostPort`, não há alternativa
+  # sem trocar a forma de entrada (NodePort com dois Pods, ou um balanceador).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kong
+  template:
+    metadata:
+      labels:
+        app: kong
+      annotations:
+        # Força o Pod a reiniciar quando a configuração muda. Sem isto, mudar o
+        # ConfigMap não teria efeito — o Kong lê o arquivo na partida, e o
+        # arquivo montado só é atualizado no disco, não recarregado.
+        #
+        # O valor é preenchido pelo script de publicação com o hash do kong.yml.
+        gateway/config-hash: "sera-preenchido-na-publicacao"
+    spec:
+      containers:
+        - name: kong
+          image: kong:3.8
+
+          ports:
+            - name: proxy
+              containerPort: 8000
+              # ⚠️ `hostPort` porque quem chama o Kong é o `cloudflared`, e ele
+              # roda FORA do cluster, no host. Sem isto o túnel não teria como
+              # alcançá-lo.
+              #
+              # 8050 é a porta histórica do gateway aqui — mantida para o
+              # `config.yml` do túnel não precisar mudar no dia do corte. Um
+              # arquivo a menos para errar sob pressão.
+              hostPort: 8050
+            - name: status
+              containerPort: 8100
+
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /kong/kong.yml
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            - name: KONG_ADMIN_ERROR_LOG
+              value: /dev/stderr
+            # ⚠️ O admin fica DESLIGADO. Numa configuração declarativa ele não
+            # serve para nada — não há o que administrar em tempo de execução —
+            # e é uma porta a menos que alguém possa alcançar.
+            - name: KONG_ADMIN_LISTEN
+              value: "off"
+            - name: KONG_STATUS_LISTEN
+              value: "0.0.0.0:8100"
+            - name: KONG_HEADERS
+              value: "off"
+
+            # O IP real de quem chamou vem no cabeçalho do Cloudflare.
+            #
+            # 🐞 Sem isto, TODA requisição chega com o IP do túnel — e qualquer
+            # contagem por IP (bloqueio de tentativa de login, limite de
+            # requisição) passa a valer para o mundo inteiro de uma vez. O
+            # sintoma seria "um usuário bloqueou todo mundo".
+            - name: KONG_REAL_IP_HEADER
+              value: "CF-Connecting-IP"
+            - name: KONG_REAL_IP_RECURSIVE
+              value: "on"
+            - name: KONG_TRUSTED_IPS
+              value: "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+            - name: KONG_NGINX_WORKER_PROCESSES
+              value: "2"
+            - name: KONG_MEM_CACHE_SIZE
+              value: "128m"
+            # `LAST,A,CNAME`: o Kong resolve nome de Service do Kubernetes, e a
+            # ordem padrão tenta SRV primeiro — que para Service headless
+            # devolve resposta que ele interpreta diferente do esperado.
+            - name: KONG_DNS_ORDER
+              value: "LAST,A,CNAME"
+
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: status
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: status
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 5
+
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # 8050 não é porta privilegiada, mas o Kong escuta na 8000 dentro
+              # do contêiner e o `hostPort` faz o mapeamento — nenhuma
+              # capacidade extra é necessária.
+
+          # 🐞 NÃO montar nada em `/usr/local/kong`.
+          #
+          # A primeira versão punha um `emptyDir` ali, pensando em dar um lugar
+          # gravável para os soquetes do Kong. O volume ESCONDEU os arquivos que
+          # a imagem traz naquele caminho, e o Kong morreu na partida:
+          #
+          #   error loading module 'kong.plugins.opentelemetry.handler'
+          #   /usr/local/kong/include/opentelemetry/.../trace_service.proto:
+          #   No such file or directory
+          #
+          # A mensagem fala de arquivo faltando, e a causa é um volume tapando
+          # o diretório. Montar sobre caminho que a imagem popula apaga o que
+          # estava lá — e o sintoma nunca menciona o volume.
+          #
+          # Não é preciso: o disco do contêiner é gravável (não há
+          # `readOnlyRootFilesystem` aqui, de propósito, porque o Kong escreve
+          # soquete e cache no próprio prefixo).
+          volumeMounts:
+            - name: config
+              mountPath: /kong
+              readOnly: true
+
+      volumes:
+        - name: config
+          configMap:
+            name: kong-config
+---
+# Service para quem estiver DENTRO do cluster falar com o Kong. O tráfego
+# público não passa por aqui — ele entra pelo `hostPort`, direto do túnel.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong
+  namespace: gateway
+  labels:
+    app: kong
+spec:
+  type: ClusterIP
+  selector:
+    app: kong
+  ports:
+    - name: proxy
+      port: 8000
+      targetPort: proxy
