@@ -74,7 +74,7 @@ if not os.path.isdir('gateway'):
 # `deploys`: os Deployments a esperar
 # `checa`:   (host, caminho, codigo-esperado)
 PROJETOS = [
-    dict(dir='central-ia', ns='central-ia',
+    dict(dir='central-ia', sonar='dart', ns='central-ia',
          imagens=[('central-motor', '-t {REG}/central-motor:$TAG .'),
                   ('central-portal', '-t {REG}/central-portal:$TAG ./_portal')],
          # ⚠️ O portal e OUTRO repositorio, e o deploy dos dois mora no mesmo
@@ -88,22 +88,22 @@ PROJETOS = [
          deploys=['central-motor', 'central-portal', 'central-imagem-rembg'],
          checa=[('central-ia.hmg', '/', '200')]),
 
-    dict(dir='opuschat', ns='opuschat',
+    dict(dir='opuschat', sonar='dart', ns='opuschat',
          imagens=[('opuschat', '-t {REG}/opuschat:$TAG .')],
          deploys=['opuschat-app', 'opuschat-redis'],
          checa=[('opuschat.hmg', '/', '200')]),
 
-    dict(dir='cafe-mobile-erp', ns='plataforma',
+    dict(dir='cafe-mobile-erp', sonar='dart', ns='plataforma',
          imagens=[('plataforma', '-t {REG}/plataforma:$TAG .')],
          deploys=['plataforma-app', 'plataforma-redis'],
          checa=[('cafe-api.hmg', '/', '200')]),
 
-    dict(dir='sigma-financeiro', ns='sigma-financeiro',
+    dict(dir='sigma-financeiro', sonar='node', ns='sigma-financeiro',
          imagens=[('sigma-financeiro', '-t {REG}/sigma-financeiro:$TAG .')],
          deploys=['sigma-financeiro'],
          checa=[('sigma-financeiro.hmg', '/', '200')]),
 
-    dict(dir='live-flow', ns='urupix',
+    dict(dir='live-flow', sonar='node', ns='urupix',
          imagens=[('urupix', '-t {REG}/urupix:$TAG .')],
          deploys=['urupix-app', 'urupix-redis'],
          # ⚠️ O urupix e o unico com dinheiro de terceiro. A verificacao confere
@@ -111,12 +111,12 @@ PROJETOS = [
          # credencial -- um deploy que abrisse a API passaria em todo o resto.
          checa=[('urupix.hmg', '/', '200')]),
 
-    dict(dir='sprinklegames-portal', ns='sprinklegames',
+    dict(dir='sprinklegames-portal', sonar='node', ns='sprinklegames',
          imagens=[('sprinklegames-portal', '-t {REG}/sprinklegames-portal:$TAG .')],
          deploys=['sprinklegames-portal'],
          checa=[('sprinklegames.hmg', '/', '200')]),
 
-    dict(dir='sigma-payments', ns='sigma-payments',
+    dict(dir='sigma-payments', sonar='maven', ns='sigma-payments',
          imagens=[('sigma-payments', '-t {REG}/sigma-payments:$TAG .'),
                   ('sigma-payments-ops-api', '-f Dockerfile.ops-api -t {REG}/sigma-payments-ops-api:$TAG .'),
                   ('sigma-payments-ops-ui', '-t {REG}/sigma-payments-ops-ui:$TAG ./sigma-payments-ops-ui')],
@@ -330,6 +330,19 @@ for p in PROJETOS:
 
     texto = ''.join(partes)
     assert '\\' not in texto, '%s: contrabarra no Jenkinsfile quebra o Groovy' % p['dir']
+
+    # 🐞 As aspas triplas tem que fechar em PAR.
+    #
+    # O build #1 do system-api morreu porque um COMENTARIO dentro do bloco
+    # escrevia as tres aspas literalmente, para explicar este mesmo tipo de
+    # problema -- e elas fecharam a string tres palavras antes. O Groovy
+    # reclamou de "expecting '}', found 'do'" apontando para dentro do
+    # comentario, que para ele nunca foi comentario: a string ja tinha acabado.
+    #
+    # A regra vale para o TEXTO tambem, e nao so para o codigo: nunca escrever
+    # o delimitador dentro do que ele delimita.
+    assert texto.count(chr(39) * 3) % 2 == 0, (
+        '%s: numero IMPAR de aspas triplas -- algum bloco nao fecha' % p['dir'])
 
     caminho = os.path.join(p['dir'], 'Jenkinsfile')
     io.open(caminho, 'w', encoding='utf-8', newline='\n').write(texto)

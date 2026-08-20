@@ -58,6 +58,7 @@ import jenkins.plugins.git.GitSCMSource
 import jenkins.scm.impl.trait.RegexSCMHeadFilterTrait
 import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject
 import com.cloudbees.hudson.plugins.folder.computed.PeriodicFolderTrigger
+import jenkins.plugins.git.traits.BranchDiscoveryTrait
 
 def ID_CRED  = 'github-ssh-samucation'
 def ARQUIVO  = new File('/var/lib/jenkins/secrets/github-ssh-key')
@@ -111,7 +112,7 @@ if (ARQUIVO.exists() && ARQUIVO.text.trim()) {
 // quem constroi o portal e o pipeline do `central-ia`, que o busca. Dois
 // pipelines editando o mesmo overlay brigariam.
 // ---------------------------------------------------------------------------
-def REPOS = [
+REPOS = [
     'system-api', 'sigma-midia', 'central-ia', 'opuschat', 'cafe-mobile-erp',
     'sigma-financeiro', 'live-flow', 'sigma-payments', 'sprinklegames-portal',
     'gateway',
@@ -141,11 +142,25 @@ REPOS.each { repo ->
     def fonte = new GitSCMSource("git@github.com:Samucation/${repo}.git")
     fonte.setCredentialsId(ID_CRED)
 
-    // ⚠️ So `main`. Sem este filtro o Jenkins constroi TODA branch que tenha
-    // Jenkinsfile -- e cada branch de trabalho viraria build. Os proprios
+    // 🐞 `BranchDiscoveryTrait` PRECISA estar aqui, e explicitamente.
+    //
+    // `setTraits()` SUBSTITUI a lista padrao -- nao acrescenta. A primeira
+    // versao passava so o filtro de regex, e com isso o trait que DESCOBRE
+    // branches foi embora junto: sobrou um filtro sem nada para filtrar.
+    //
+    // O sintoma foi cruel de ler: a varredura terminava com SUCESSO (coluna
+    // "ultimo sucesso" preenchida, sem erro em log nenhum) e a pasta ficava
+    // vazia, com o Jenkins sugerindo "Configure the project" -- como se o job
+    // nao estivesse configurado. Estava; so nao tinha quem procurasse.
+    //
+    // O filtro `^main$` continua: sem ele o Jenkins constroi TODA branch que
+    // tenha Jenkinsfile, e cada branch de trabalho viraria build. Os proprios
     // Jenkinsfile ja travam o DEPLOY na main, mas construir tudo desperdicaria
     // o disco de 57G que ja esta em 76%.
-    fonte.setTraits([new RegexSCMHeadFilterTrait('^main$')])
+    fonte.setTraits([
+        new BranchDiscoveryTrait(),
+        new RegexSCMHeadFilterTrait('^main$'),
+    ])
 
     projeto.setSourcesList([new BranchSource(fonte)])
     projeto.setDescription(
@@ -186,11 +201,22 @@ REPOS.each { repo ->
 def disparo = new Thread({
     sleep(90000)
     def n = 0
-    REPOS.each { repo ->
-        def p = Jenkins.get().getItem(repo)
-        if (p != null) { p.scheduleBuild2(0); n++ }
+    def ausentes = []
+    def alvos = Jenkins.get().getItems().findAll { it instanceof WorkflowMultiBranchProject }
+    // 🐞 Varre o que o Jenkins TEM, em vez de consultar pela lista REPOS.
+    //
+    // A versao anterior fazia `REPOS.each { Jenkins.get().getItem(it) }` dentro
+    // da closure e achava ZERO -- variavel declarada com `def` num script
+    // Groovy e local ao `run()`, e a closure executada depois, noutra linha de
+    // execucao, nao a enxerga. O laco simplesmente nao iterava.
+    //
+    // A mensagem era "varredura disparada em 0 job(s)": honesta, mas facil de
+    // ler como "nao ha jobs" em vez de "nao consegui ver a lista".
+    alvos.each { p ->
+        try { p.scheduleBuild2(0); n++ } catch (e) { ausentes << "${p.name}: ${e.message}" }
     }
-    println "[ssh] varredura disparada em ${n} job(s), 90s apos a partida"
+    println "[ssh] varredura disparada em ${n} job(s) de ${alvos.size()} encontrados"
+    ausentes.each { println "[ssh] falhou: ${it}" }
 })
 disparo.setDaemon(true)
 disparo.start()

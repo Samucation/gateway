@@ -1,0 +1,293 @@
+# ===========================================================================
+# SonarQube — análise estática, com Quality Gate travando as esteiras.
+#
+#     microk8s kubectl apply -f vm/sonarqube.yaml
+#
+# ---------------------------------------------------------------------------
+# ⚠️ CUSTO MEDIDO ANTES DE INSTALAR
+# ---------------------------------------------------------------------------
+# A VM tem 19 GB de RAM (9,5 livres) e 57 GB de disco — **77% usados, 13 GB
+# livres**. RAM sobra; disco é o aperto.
+#
+# Por isso os limites abaixo são apertados de propósito, e o índice do
+# Elasticsearch fica num volume com teto. Se o disco chegar perto do fim, o
+# Sonar é a primeira coisa a sacrificar: ele melhora o código, mas não serve
+# nenhum cliente. Os bancos e a mídia vêm antes.
+#
+# A limpeza diária (`limpar-disco.sh`, 03:40) recuperou 3 GB hoje. Ela é o que
+# torna isto sustentável — se ela parar, o disco enche.
+#
+# ---------------------------------------------------------------------------
+# ⚠️ vm.max_map_count
+# ---------------------------------------------------------------------------
+# O SonarQube traz um Elasticsearch dentro, e ele exige `vm.max_map_count >=
+# 262144`. Está em `/etc/sysctl.d/99-sonarqube.conf` na VM — em `sysctl.d` e
+# não aplicado à mão, senão voltaria ao padrão no próximo boot e o Sonar
+# quebraria lá, quando ninguém lembra do porquê.
+# ===========================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sonarqube
+  labels:
+    app.kubernetes.io/part-of: ferramentas
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sonar-postgres
+  namespace: sonarqube
+spec:
+  serviceName: sonar-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonar-postgres
+  template:
+    metadata:
+      labels:
+        app: sonar-postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsNonRoot: true
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: sonarqube
+            - name: POSTGRES_USER
+              value: sonar
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sonarqube-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "sonar", "-d", "sonarqube"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: dados
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: dados
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: microk8s-hostpath
+        resources:
+          requests:
+            storage: 4Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sonarqube
+  namespace: sonarqube
+spec:
+  serviceName: sonarqube
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+
+      # ⚠️ O `initContainer` existe porque os volumes nascem com dono `root`, e
+      # o SonarQube roda como 1000. Sem isto ele morre na partida sem conseguir
+      # escrever, e o erro fala de permissão num caminho que ninguém configurou.
+      #
+      # `fsGroup` resolveria o grupo, mas não o DONO — e o Elasticsearch dentro
+      # do Sonar exige dono, não só grupo.
+      initContainers:
+        - name: permissoes
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 1000:1000 /opt/sonarqube/data /opt/sonarqube/extensions /opt/sonarqube/logs"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: dados
+              mountPath: /opt/sonarqube/data
+            - name: extensoes
+              mountPath: /opt/sonarqube/extensions
+            - name: logs
+              mountPath: /opt/sonarqube/logs
+
+      containers:
+        - name: sonarqube
+          image: sonarqube:25.6.0.109173-community
+          ports:
+            - name: http
+              containerPort: 9000
+          env:
+            - name: SONAR_JDBC_URL
+              value: jdbc:postgresql://sonar-postgres:5432/sonarqube
+            - name: SONAR_JDBC_USERNAME
+              value: sonar
+            - name: SONAR_JDBC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sonarqube-secrets
+                  key: POSTGRES_PASSWORD
+
+            # ⚠️ Teto de heap apertado. O padrão do Sonar assume máquina
+            # dedicada; aqui ele divide 19 GB com 57 outros Pods.
+            - name: SONAR_WEB_JAVAOPTS
+              value: "-Xmx1024m -Xms256m"
+            - name: SONAR_CE_JAVAOPTS
+              value: "-Xmx1024m -Xms256m"
+            - name: SONAR_SEARCH_JAVAOPTS
+              value: "-Xmx512m -Xms512m"
+
+            # O Elasticsearch embutido recusa rodar como root; já rodamos como
+            # 1000, então esta checagem só atrapalharia.
+            - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
+              value: "true"
+
+          # ⚠️ O Sonar demora MUITO para subir na primeira vez (migração do
+          # banco + índice do Elasticsearch). `failureThreshold` alto no startup
+          # e liveness só depois — senão o Kubernetes o mata no meio da
+          # migração, e a próxima tentativa encontra o banco pela metade.
+          startupProbe:
+            httpGet:
+              path: /api/system/status
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/system/status
+              port: http
+            periodSeconds: 15
+            failureThreshold: 4
+          livenessProbe:
+            httpGet:
+              path: /api/system/status
+              port: http
+            periodSeconds: 30
+            failureThreshold: 6
+
+          resources:
+            requests:
+              memory: "1536Mi"
+              cpu: "200m"
+            limits:
+              memory: "3Gi"
+              cpu: "2000m"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: dados
+              mountPath: /opt/sonarqube/data
+            - name: extensoes
+              mountPath: /opt/sonarqube/extensions
+            - name: logs
+              mountPath: /opt/sonarqube/logs
+            - name: temp
+              mountPath: /opt/sonarqube/temp
+
+      volumes:
+        - name: temp
+          emptyDir: {}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: dados
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: microk8s-hostpath
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: extensoes
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: microk8s-hostpath
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: microk8s-hostpath
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  namespace: sonarqube
+spec:
+  type: ClusterIP
+  selector:
+    app: sonarqube
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonar-postgres
+  namespace: sonarqube
+spec:
+  clusterIP: None
+  selector:
+    app: sonar-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sonarqube
+  namespace: sonarqube
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: sonar.hmg
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sonarqube
+                port:
+                  number: 9000
