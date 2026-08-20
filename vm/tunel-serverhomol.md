@@ -58,11 +58,52 @@ Self-hosted**
 
 Política: **Allow**, regra **Emails** → `samucationx@gmail.com`.
 
-### 2. Só então, o DNS
+### 2. O DNS — **já criado**, e travado em 404
+
+O registro existe desde 20/08/2026. O hostname **não entrega o Jenkins**: a
+regra do túnel devolve `http_status:404` para todo mundo. Assim o mapeamento
+está pronto sem que a tela de login fique exposta enquanto o Access não sobe.
+
+Conferido de fora: `404`, corpo vazio, sem menção a Jenkins.
+
+Para **ligar**, depois que a aplicação do Access existir, troque em
+`/etc/cloudflared/config.yml`:
+
+```yaml
+  - hostname: jenkins.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8080     # era http_status:404
+```
+
+```bash
+sudo cloudflared tunnel ingress validate && sudo systemctl restart cloudflared
+```
+
+#### 🐞 `tunnel route dns <nome>` ignorou o nome que eu passei
+
+O comando abaixo criou o CNAME apontando para o túnel **errado**:
 
 ```powershell
 cloudflared tunnel route dns serverhomol jenkins.cursodetecnologia.dev.br
+# INF Added CNAME ... will route to this tunnel tunnelID=47a05dc3...  <- nerdquiz!
 ```
+
+Ele leu o `tunnel:` do `~/.cloudflared/config.yml` da estação em vez de usar o
+nome do argumento. E **não avisou** — a mensagem de sucesso traz o ID errado no
+meio, que é fácil de não ler.
+
+Aqui não houve estrago porque o `nerdquiz` não tem regra para `jenkins` e o
+catch-all dele é `http_status:404`. Num túnel com catch-all diferente, o
+hostname teria começado a servir a aplicação errada.
+
+O jeito que funciona é isolar o config e passar o **UUID**:
+
+```powershell
+cloudflared --config <config-minimo-com-o-uuid-certo> tunnel route dns `
+    --overwrite-dns f0d7cd68-27da-4686-b826-4ce1d3a9243f jenkins.cursodetecnologia.dev.br
+```
+
+⚠️ **Confira sempre o `tunnelID=` na saída.** É a única confirmação de para
+onde o registro foi mesmo.
 
 ### 3. E só então, fechar o `bind` do Jenkins
 
