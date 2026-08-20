@@ -215,6 +215,40 @@ echo | openssl s_client -connect <IP>:10250 2>/dev/null | openssl x509 -noout -t
 
 ---
 
+## 5c. ACONTECEU: a VM caiu e o HOSPEDEIRO passou a responder no IP dela
+
+**Confirmado em 19/08/2026**, no meio de um trabalho. O sintoma foi:
+
+```
+ssh: connect to host 192.168.15.54 port 22: Connection refused
+```
+
+E o mais enganoso: **o ping continuava respondendo**.
+
+```
+Reply from 192.168.15.54: bytes=32 time=3ms TTL=128
+arp  192.168.15.54  ->  c8-8a-9a-7c-62-12   (resolve normalmente)
+Test-NetConnection porta 22 -> False
+```
+
+Lido pela metade, isso parece "o SSH caiu". Não é.
+
+**A pista é o TTL.** A VM sempre respondeu `TTL=64` (Linux). Aquele `TTL=128` é
+**Windows** — quem estava atendendo o ping era o NOTEBOOK, não a VM. O Ubuntu
+não estava rodando.
+
+Faz sentido com o item 4: em ponte por Wi-Fi a VM sai com o MAC do host, e com
+ela suspensa o próprio host responde por aquele endereço. O ARP resolve, o ping
+responde, e nada disso significa que a máquina virtual existe.
+
+**Conserto.** Ligar a VM no VMware. Nada a fazer na rede.
+
+**A lição de método:** `ping` + `arp` respondendo NÃO provam que o host certo
+está vivo. Uma linha a mais — o TTL — separa "está no ar" de "outra coisa está
+no ar no lugar dele". É o teste mais barato do catálogo e o que mais rende.
+
+---
+
 ## 6. TTL diz qual sistema respondeu
 
 Conferência barata, antes de qualquer conexão:
