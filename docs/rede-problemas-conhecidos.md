@@ -215,9 +215,9 @@ echo | openssl s_client -connect <IP>:10250 2>/dev/null | openssl x509 -noout -t
 
 ---
 
-## 5c. ACONTECEU: a VM caiu e o HOSPEDEIRO passou a responder no IP dela
+## 5c. ACONTECEU: o IP da VM mudou e o HOSPEDEIRO ficou com o antigo
 
-**Confirmado em 19/08/2026**, no meio de um trabalho. O sintoma foi:
+**Confirmado em 19-20/08/2026.** O sintoma foi:
 
 ```
 ssh: connect to host 192.168.15.54 port 22: Connection refused
@@ -226,26 +226,65 @@ ssh: connect to host 192.168.15.54 port 22: Connection refused
 E o mais enganoso: **o ping continuava respondendo**.
 
 ```
-Reply from 192.168.15.54: bytes=32 time=3ms TTL=128
-arp  192.168.15.54  ->  c8-8a-9a-7c-62-12   (resolve normalmente)
-Test-NetConnection porta 22 -> False
+Reply from 192.168.15.54: bytes=32 time=3ms TTL=128     <- 128 = WINDOWS
+arp  192.168.15.54  ->  c8-8a-9a-7c-62-12               (resolve normalmente)
+porta 22 / 80 / 8080 -> todas fechadas
 ```
 
-Lido pela metade, isso parece "o SSH caiu". Não é.
-
 **A pista é o TTL.** A VM sempre respondeu `TTL=64` (Linux). Aquele `TTL=128` é
-**Windows** — quem estava atendendo o ping era o NOTEBOOK, não a VM. O Ubuntu
-não estava rodando.
+Windows: quem atendia o ping era o **notebook**, não a VM.
 
-Faz sentido com o item 4: em ponte por Wi-Fi a VM sai com o MAC do host, e com
-ela suspensa o próprio host responde por aquele endereço. O ARP resolve, o ping
-responde, e nada disso significa que a máquina virtual existe.
+⚠️ **E a conclusão fácil daí é ERRADA.** Eu li isso como "a VM caiu". Não tinha
+caído: `uptime` mostrou **2 dias e 11 horas** no ar. O que mudou foi o
+**endereço** — a VM foi para `192.168.15.55` e o notebook ficou com o `.54`.
 
-**Conserto.** Ligar a VM no VMware. Nada a fazer na rede.
+Faz sentido com o item 4: em ponte por Wi-Fi a VM sai com o MAC do host, então a
+concessão de DHCP está amarrada àquele MAC — e os dois disputam o mesmo aluguel.
 
-**A lição de método:** `ping` + `arp` respondendo NÃO provam que o host certo
-está vivo. Uma linha a mais — o TTL — separa "está no ar" de "outra coisa está
-no ar no lugar dele". É o teste mais barato do catálogo e o que mais rende.
+**Como achar a máquina no endereço novo** (mais rápido que varrer a mão):
+
+```powershell
+# procura quem tem SSH aberto na faixa
+1..254 | ForEach-Object {
+  $ip = "192.168.15.$_"
+  $c = New-Object System.Net.Sockets.TcpClient
+  $r = $c.BeginConnect($ip, 22, $null, $null)
+  if ($r.AsyncWaitHandle.WaitOne(300)) { $ip; $c.Close() }
+}
+```
+
+E confirmar pelo TTL (`64` = Linux) antes de tentar a chave.
+
+### O que quebra junto: o certificado do kubelet
+
+O certificado do kubelet é emitido para o IP da instalação. Com o IP novo:
+
+```
+kubectl exec / logs -f / port-forward / top
+  -> x509: certificate is valid for 192.168.15.54, not 192.168.15.55
+```
+
+E confunde porque **o resto do cluster funciona**: o certificado do servidor de
+API o MicroK8s renova sozinho (o `csr.conf.template` tem o marcador `#MOREIPS`);
+o do kubelet, **não**. `microk8s refresh-certs` também não cobre este.
+
+⚠️ **Pôr o hostname no certificado NÃO resolve** — foi o que eu tentei antes.
+O servidor de API conecta no kubelet pelo **endereço**
+(`https://192.168.15.55:10250`), não pelo nome. Nome no certificado só vale para
+quem conecta pelo nome.
+
+**Resolvido de vez em 20/08/2026:** `/usr/local/sbin/microk8s-kubelet-cert.sh`
+compara o IP do certificado com o do nó, reemite se divergirem e reinicia o
+MicroK8s. Roda na partida pelo serviço `microk8s-kubelet-cert.service`, e é
+idempotente — quando já está certo, não faz nada.
+
+### O conserto de verdade continua sendo fixar o endereço
+
+O script trata o sintoma bem, mas cada troca de IP ainda custa uma reinicialização
+do MicroK8s e a atualização dos scripts que guardam o endereço.
+
+**Reserva de DHCP no roteador**, amarrada ao MAC, encerra o assunto — e é o único
+passo que depende do dono da rede.
 
 ---
 
