@@ -15,7 +15,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-K="sudo microk8s kubectl"
+# `sudo` por padrao, porque rodando a mao na VM e o que funciona. Mas a esteira
+# roda como o usuario `jenkins`, que ja esta no grupo `microk8s` e NAO tem sudo
+# sem senha -- para ele, `sudo` travaria esperando uma senha que ninguem vai
+# digitar, ate estourar o tempo limite do estagio. Dai o override:
+#
+#     KUBECTL='microk8s kubectl' ./vm/publicar.sh
+K="${KUBECTL:-sudo microk8s kubectl}"
 
 [ -f kong.yml ] || { echo "kong.yml nao existe. Rode: node vm/gerar-kong-vm.mjs"; exit 1; }
 

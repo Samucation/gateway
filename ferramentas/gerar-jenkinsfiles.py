@@ -32,9 +32,43 @@ AS REGRAS QUE TODO PIPELINE DESTE AMBIENTE SEGUE
 
 5. O estagio de verificacao pergunta as APLICACOES, pelo Ingress. `rollout
    status` diz que a probe aprovou; ele nao diz que a coisa responde de fora.
+
+-------------------------------------------------------------------------------
+⚠️ O GATEWAY NAO ESTA NESTA LISTA, E ISSO E PROPOSITAL
+-------------------------------------------------------------------------------
+O `gateway/Jenkinsfile` foi escrito A MAO. Nao e esquecimento -- nao acrescente
+o gateway em PROJETOS "para completar a lista".
+
+Este gerador monta pipelines de APLICACAO: constroi imagem, empurra para o
+registro, troca a tag num overlay do kustomize. O gateway nao faz nenhuma das
+tres -- ele gera um kong.yml, cria um ConfigMap e carimba um hash numa
+anotacao. Encaixa-lo aqui exigiria uma excecao em cada estagio, e o valor deste
+arquivo e justamente as nove serem IGUAIS.
+
+E ha uma diferenca de risco que o molde nao sabe representar: o gateway usa
+`Recreate` (obrigatorio por causa do `hostPort`), entao toda publicacao dele e
+uma queda total de alguns segundos em TODAS as rotas de TODOS os projetos. Por
+isso ele e o unico que nao implanta sozinho na `main` -- exige marcar um
+parametro ao disparar. Um gateway que se republica a cada commit transformaria
+um ajuste de comentario numa queda geral.
 """
 import io
 import os
+import sys
+
+# ---------------------------------------------------------------------------
+# 🐞 Ele escreve em caminhos RELATIVOS (`central-ia/Jenkinsfile`), entao so
+# funciona a partir da raiz do Workspace. Rodado de dentro de `gateway/`, ele
+# morria com um `FileNotFoundError: 'central-ia\\Jenkinsfile'` -- que nao diz
+# nada sobre a causa e manda a pessoa procurar o repositorio que sumiu.
+#
+# Em vez de exigir que se lembre disso, ele mesmo se muda para a raiz: dois
+# niveis acima deste arquivo (ferramentas/ -> gateway/ -> Workspace/).
+# ---------------------------------------------------------------------------
+RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+os.chdir(RAIZ)
+if not os.path.isdir('gateway'):
+    sys.exit('nao achei o Workspace a partir de %s -- este arquivo mudou de lugar?' % RAIZ)
 
 # `imagens`: (nome-da-imagem, argumentos-do-docker-build)
 # `deploys`: os Deployments a esperar
