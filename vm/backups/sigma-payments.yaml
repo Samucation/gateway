@@ -1,65 +1,5 @@
-# -*- coding: utf-8 -*-
-"""
-Gera o CronJob de backup de cada namespace do cluster.
-
-    python vm/gerar-backups.py
-
--------------------------------------------------------------------------------
-POR QUE AGORA, ANTES DO CORTE
--------------------------------------------------------------------------------
-Cinco dos sete namespaces nao tinham backup nenhum -- e sao justamente os que
-vao RECEBER o dado de producao no corte.
-
-Backup precisa existir ANTES do dado chegar. Criado depois, ha uma janela em
-que o dado ja e insubstituivel e ainda nao tem copia; e essa janela costuma
-durar mais do que se planeja, porque "backup" vira tarefa de amanha assim que a
-migracao parece ter dado certo.
-
--------------------------------------------------------------------------------
-POR QUE UM GERADOR
--------------------------------------------------------------------------------
-Sao cinco arquivos quase iguais. Escritos a mao, divergem na primeira correcao
--- e correcao vai haver, porque o CronJob do sigma-midia ja precisou de duas
-(HOME para o `mc`, e sair do `apk add`).
-
-Aqui a correcao e feita uma vez e vale para todos.
-"""
-import io
-import os
-
-# Cada namespace, com os bancos que ele tem.
-#
-# `pod` e o nome do Pod do StatefulSet (sempre `-0`, porque sao replica unica);
-# `chave` e a entrada do Secret que guarda a senha daquele banco.
-NAMESPACES = [
-    dict(ns='central-ia', hora='0 5 * * *', secret='central-ia-secrets', bancos=[
-        dict(pod='central-postgres-motor-0',  user='central', db='central',        chave='POSTGRES_PASSWORD', arq='motor.dump'),
-        dict(pod='central-postgres-portal-0', user='central', db='central_portal', chave='POSTGRES_PASSWORD', arq='portal.dump'),
-    ]),
-    dict(ns='opuschat', hora='15 5 * * *', secret='opuschat-secrets', bancos=[
-        dict(pod='opuschat-postgres-0', user='plataforma', db='plataforma', chave='POSTGRES_PASSWORD', arq='app.dump'),
-    ]),
-    dict(ns='plataforma', hora='30 5 * * *', secret='plataforma-secrets', bancos=[
-        dict(pod='plataforma-postgres-0', user='plataforma', db='plataforma', chave='POSTGRES_PASSWORD', arq='app.dump'),
-    ]),
-    dict(ns='sigma-financeiro', hora='45 5 * * *', secret='sigma-financeiro-secrets', bancos=[
-        dict(pod='sigma-db-0',         user='sigma', db='sigma_financeiro',         chave='POSTGRES_PASSWORD', arq='producao.dump'),
-        dict(pod='sigma-db-sandbox-0', user='sigma', db='sigma_financeiro_sandbox', chave='POSTGRES_PASSWORD', arq='sandbox.dump'),
-    ]),
-    dict(ns='sigma-payments', hora='15 6 * * *', secret='sigma-payments-secrets', bancos=[
-        # DOIS bancos no mesmo servidor: o produto e o painel de operacao.
-        # Levar so um daria uma restauracao que parece completa e deixa metade
-        # do servico sem base.
-        dict(pod='sigma-payments-postgres-0', user='sigma', db='sigma_payments', chave='POSTGRES_PASSWORD', arq='payments.dump'),
-        dict(pod='sigma-payments-postgres-0', user='sigma', db='sigma_ops',      chave='POSTGRES_PASSWORD', arq='ops.dump'),
-    ]),
-    dict(ns='urupix', hora='0 6 * * *', secret='urupix-secrets', bancos=[
-        dict(pod='urupix-postgres-0', user='liveflow', db='liveflow', chave='POSTGRES_PASSWORD', arq='app.dump'),
-    ]),
-]
-
-GABARITO = '''# ===========================================================================
-# BACKUP do namespace `{ns}`.
+# ===========================================================================
+# BACKUP do namespace `sigma-payments`.
 #
 # GERADO por gateway/vm/gerar-backups.py — NAO editar a mao. Sao cinco arquivos
 # quase iguais; editados um a um, divergem na primeira correcao.
@@ -83,17 +23,17 @@ GABARITO = '''# ================================================================
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {ns}-backup
-  namespace: {ns}
+  name: sigma-payments-backup
+  namespace: sigma-payments
 spec:
   # 🐞 `timeZone` DECLARADO. O `schedule` e avaliado pelo CONTROLADOR, cujo
-  # padrao e UTC -- nao o fuso do no nem o do conteiner. Sem isto, "{hora}"
+  # padrao e UTC -- nao o fuso do no nem o do conteiner. Sem isto, "15 6 * * *"
   # rodaria tres horas antes.
   #
   # E um erro que nao da erro: o backup roda, os arquivos aparecem, e so quem
   # conferir o horario percebe -- o que importa quando se escolhe a madrugada
   # justamente para pegar o banco parado.
-  schedule: "{hora}"
+  schedule: "15 6 * * *"
   timeZone: America/Sao_Paulo
 
   # Horarios espalhados entre os namespaces: dois `pg_dump` ao mesmo tempo
@@ -126,8 +66,8 @@ spec:
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:
-                      name: {secret}
-                      key: {chave}
+                      name: sigma-payments-secrets
+                      key: POSTGRES_PASSWORD
               command:
                 - /bin/sh
                 - -c
@@ -142,7 +82,9 @@ spec:
                   D=/backup/$(date +%Y%m%d-%H%M)
                   mkdir -p "$D"
                   echo "==> $D"
-{comandos}
+                  pg_dump -h sigma-payments-postgres -U sigma -d sigma_payments -Fc -f "$D/payments.dump"
+                  pg_dump -h sigma-payments-postgres -U sigma -d sigma_ops -Fc -f "$D/ops.dump"
+
                   # PROVA de que cada arquivo presta, e nao so de que existe.
                   #
                   # `pg_restore --list` le o indice interno do dump. Truncado ou
@@ -152,7 +94,7 @@ spec:
                   for f in "$D"/*.dump; do
                     n=$(pg_restore --list "$f" | wc -l)
                     echo "    $(basename $f): $(du -h "$f" | cut -f1), $n objetos"
-                    [ "$n" -gt 0 ] || {{ echo "VAZIO: $f"; exit 1; }}
+                    [ "$n" -gt 0 ] || { echo "VAZIO: $f"; exit 1; }
                   done
 
                   # Guarda 7 dias.
@@ -178,34 +120,16 @@ spec:
           volumes:
             - name: backup
               persistentVolumeClaim:
-                claimName: {ns}-backup
+                claimName: sigma-payments-backup
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {ns}-backup
-  namespace: {ns}
+  name: sigma-payments-backup
+  namespace: sigma-payments
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: microk8s-hostpath
   resources:
     requests:
       storage: 8Gi
-'''
-
-AQUI = os.path.dirname(os.path.abspath(__file__))
-SAIDA = os.path.join(AQUI, 'backups')
-os.makedirs(SAIDA, exist_ok=True)
-
-for n in NAMESPACES:
-    comandos = []
-    for b in n['bancos']:
-        comandos.append('                  pg_dump -h %s -U %s -d %s -Fc -f "$D/%s"'
-                        % (b['pod'].rsplit('-0', 1)[0], b['user'], b['db'], b['arq']))
-    # Todos os bancos de um namespace usam a mesma senha (o Secret e um so).
-    chave = n['bancos'][0]['chave']
-    texto = GABARITO.format(ns=n['ns'], hora=n['hora'], secret=n['secret'],
-                            chave=chave, comandos='\n'.join(comandos) + '\n')
-    caminho = os.path.join(SAIDA, '%s.yaml' % n['ns'])
-    io.open(caminho, 'w', encoding='utf-8', newline='\n').write(texto)
-    print('  %s: %d banco(s), %s' % (n['ns'], len(n['bancos']), n['hora']))
