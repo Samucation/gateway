@@ -30,7 +30,11 @@
 # origem transforma um contratempo em incidente.
 # ===========================================================================
 param(
-    [string]$Vm      = "192.168.15.55",
+    # ⚠️ Vazio de proposito: a VM esta em DHCP e ja trocou de IP tres vezes num
+    # dia. IP fixo aqui falhava com "Connection timed out" -- erro que parece
+    # maquina fora do ar, e nao endereco trocado. Vazio, o `achar-vm.ps1`
+    # descobre e CONFERE O HOSTNAME antes de devolver.
+    [string]$Vm      = "",
     [string]$Usuario = "usuario",
     [string]$Chave   = "$env:USERPROFILE\.ssh\id_hmg_veltrixa",
     [string]$Apenas  = "",
@@ -44,6 +48,13 @@ param(
 # nao falha -- MATA o script no meio de uma migracao. As falhas que importam sao
 # conferidas explicitamente, comparando os dois lados.
 $ErrorActionPreference = 'Continue'
+
+if (-not $Vm) {
+    $Vm = & (Join-Path $PSScriptRoot 'achar-vm.ps1')
+    if (-not $Vm) { throw "nao achei a serverhomol na rede" }
+    Write-Host "==> serverhomol em $Vm" -ForegroundColor Cyan
+}
+
 $ProgressPreference    = 'SilentlyContinue'
 
 # ---------------------------------------------------------------------------

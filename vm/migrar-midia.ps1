@@ -29,7 +29,11 @@
 # não é organização: é o que faz as imagens continuarem aparecendo.
 # ===========================================================================
 param(
-    [string]$Vm      = "192.168.15.55",
+    # ⚠️ Vazio de proposito: a VM esta em DHCP e ja trocou de IP tres vezes num
+    # dia. IP fixo aqui falhava com "Connection timed out" -- erro que parece
+    # maquina fora do ar, e nao endereco trocado. Vazio, o `achar-vm.ps1`
+    # descobre e CONFERE O HOSTNAME antes de devolver.
+    [string]$Vm      = "",
     [string]$Usuario = "usuario",
     [string]$Chave   = "$env:USERPROFILE\.ssh\id_hmg_veltrixa",
     [switch]$Conferir
@@ -39,6 +43,13 @@ param(
 # externo vira ErrorRecord, e um aviso rotineiro do `psql` mataria o script no
 # meio. As falhas que importam são conferidas explicitamente.
 $ErrorActionPreference = 'Continue'
+
+if (-not $Vm) {
+    $Vm = & (Join-Path $PSScriptRoot 'achar-vm.ps1')
+    if (-not $Vm) { throw "nao achei a serverhomol na rede" }
+    Write-Host "==> serverhomol em $Vm" -ForegroundColor Cyan
+}
+
 $ProgressPreference    = 'SilentlyContinue'
 
 function Log($m) { Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m) }
