@@ -271,7 +271,21 @@ RODAPE = """
             '''
         }}
         always {{
+            // ⚠️ CADA BUILD LIMPA O QUE SUJOU. Sem isto o disco enche em uma
+            // rodada.
+            //
+            // 🐞 Medido em 21/08/2026: cinco esteiras disparadas juntas geraram
+            // 8,1 GB de cache de build em MINUTOS, e o disco foi de 77% para
+            // 97% -- 1,8 GB livres. Num Kubernetes isso nao da "sem espaco": o
+            // kubelet comeca a DESPEJAR Pods, e a mensagem fala do Pod, nao do
+            // disco.
+            //
+            // `--keep-storage` poe TETO DE TAMANHO em vez de idade. Idade nao
+            // serve aqui: o cache que enche o disco e justamente o das ultimas
+            // horas. Com 2 GB o build seguinte do mesmo projeto ainda aproveita
+            // camada, e o crescimento fica limitado.
             sh 'docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true'
+            sh 'docker builder prune -f --keep-storage=2GB >/dev/null 2>&1 || true'
         }}
     }}
 }}
