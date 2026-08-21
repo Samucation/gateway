@@ -21,11 +21,10 @@
 # O QUE MORA AQUI E O QUE AINDA MORA NA ESTAÇÃO
 # ===========================================================================
 # Migrado (serve do cluster, e sobrevive à estação desligada):
-#   urupix, sigma-midia
+#   urupix, sigma-midia, sprinklegames
 #
 # ⚠️ NÃO migrado (o túnel devolve para a estação pela rede local): quiz, api,
-# veltrixa/ninjasystem, opuschat, cafe-api, sigma-financeiro, central-ia,
-# sprinklegames.
+# veltrixa/ninjasystem, opuschat, cafe-api, sigma-financeiro, central-ia.
 #
 # Esses continuam funcionando enquanto a estação estiver ligada, e SÓ esses caem
 # quando ela for desligada — o que é o comportamento desejado: cada um migra
@@ -73,13 +72,9 @@ ingress:
     service: http://192.168.15.9:3333
 
   - hostname: sprinklegames.com.br
-    service: http://192.168.15.9:4310
-    originRequest:
-      httpHostHeader: sprinklegames.com.br
+    service: http://127.0.0.1:80
   - hostname: www.sprinklegames.com.br
-    service: http://192.168.15.9:4310
-    originRequest:
-      httpHostHeader: www.sprinklegames.com.br
+    service: http://127.0.0.1:80
 
   - hostname: cafe-api.cursodetecnologia.dev.br
     service: http://192.168.15.9:8050
