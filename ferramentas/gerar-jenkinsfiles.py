@@ -55,6 +55,8 @@ um ajuste de comentario numa queda geral.
 import io
 import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import estagios
 
 # ---------------------------------------------------------------------------
 # 🐞 Ele escreve em caminhos RELATIVOS (`central-ia/Jenkinsfile`), entao so
@@ -157,6 +159,22 @@ pipeline {{
         // sabe para onde voltar.
         TAG      = "${{env.GIT_COMMIT ? env.GIT_COMMIT.take(12) : 'local'}}"
         KUBECTL  = 'microk8s kubectl'
+
+        SONAR_URL   = 'http://sonar.hmg'
+        SONAR_CHAVE = '{dir}'
+
+        // ⚠️ O PRD AINDA NAO EXISTE.
+        //
+        // Este cluster E o de homologacao: todo hostname termina em `.hmg`, e
+        // as aplicacoes tem guardas que RECUSAM subir se o ambiente declarado
+        // nao bater com a URL que elas usam. A producao de verdade ainda roda
+        // no Docker da estacao do Samuel.
+        //
+        // Entao o estagio de PRD existe, aparece no grafico, e FALHA com
+        // mensagem clara -- em vez de passar calado dando a impressao de que
+        // promoveu alguma coisa. Quando a inversao acontecer, isto vira o
+        // contexto do cluster de producao e o resto do pipeline ja esta pronto.
+        PRD_CONTEXTO = ''
     }}
 
     stages {{
@@ -179,7 +197,7 @@ pipeline {{
 """
 
 RODAPE = """
-        stage('Implantar') {{
+        stage('Implantar em homologacao') {{
             when {{ branch 'main' }}
             steps {{
                 sh '''
@@ -210,7 +228,7 @@ RODAPE = """
         // Sem isto o pipeline ficaria verde no instante do apply, que e antes de
         // qualquer Pod ter subido. Build verde com a aplicacao em
         // CrashLoopBackOff e pior que build vermelho: ninguem vai olhar.
-        stage('Esperar ficar de pe') {{
+        stage('Esperar homologacao') {{
             when {{ branch 'main' }}
             steps {{
                 sh '''
@@ -224,7 +242,7 @@ RODAPE = """
         //
         // `rollout status` diz que a probe aprovou. Ele nao diz que a coisa
         // responde de fora.
-        stage('Verificar') {{
+        stage('Verificar homologacao') {{
             when {{ branch 'main' }}
             steps {{
                 sh '''
@@ -241,7 +259,7 @@ RODAPE = """
                 '''
             }}
         }}
-    }}
+{promocao}    }}
 
     post {{
         failure {{
@@ -326,7 +344,13 @@ for p in PROJETOS:
         for d in p['deploys'])
     checagens = '\n'.join(
         '                    checa %s %s %s' % c for c in p['checa'])
-    partes.append(RODAPE.format(esperas=esperas, checagens=checagens))
+    # O Sonar entra DEPOIS de construir e ANTES de publicar: nao adianta
+    # empurrar para o registro uma imagem que o portao vai reprovar.
+    sonar = {'maven': estagios.SONAR_MAVEN}.get(p.get('sonar'), estagios.SONAR_GENERICO)
+    partes.insert(len(partes) - 1, sonar + estagios.PORTAO)
+
+    partes.append(RODAPE.format(esperas=esperas, checagens=checagens,
+                                promocao=estagios.PROMOCAO))
 
     texto = ''.join(partes)
     assert '\\' not in texto, '%s: contrabarra no Jenkinsfile quebra o Groovy' % p['dir']
