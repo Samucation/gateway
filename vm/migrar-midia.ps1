@@ -135,7 +135,17 @@ Log "objetos: $n arquivos espelhados para o disco"
 if ($n -ne [int]$objetosOrigem) { throw "espelhei $n de $objetosOrigem objetos" }
 
 $tgz = "$env:TEMP\midia-obj-$carimbo.tgz"
-tar -czf $tgz -C $obj .
+# ⚠️ `--force-local`: sem isto o tar le `E:/caminho` como HOST REMOTO
+# (a sintaxe `maquina:/caminho` de fita), tenta abrir uma conexao e morre
+# com "Cannot write: Broken pipe" — mensagem que nao tem nada a ver com a
+# causa. O pacote nao e criado e o `scp` seguinte falha com "No such file".
+#
+# 🐞 Em 21/08/2026 isto deixou o destino PIOR que antes: as 10 linhas novas
+# do banco foram restauradas e os objetos nao, entao o destino passou de
+# 163/163 (consistente, so atrasado) para 173/163 — dez imagens quebradas.
+# ⚠️ Migracao que falha no meio nao e neutra: ela pode deixar o destino em
+# estado que nao existia em lugar nenhum.
+tar --force-local -czf $tgz -C $obj .
 & scp -i $Chave -o BatchMode=yes -q $tgz "${Usuario}@${Vm}:/tmp/obj.tgz" | Out-Null
 Remove-Item $obj -Recurse -Force; Remove-Item $tgz -Force
 
