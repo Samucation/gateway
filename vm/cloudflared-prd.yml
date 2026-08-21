@@ -1,0 +1,38 @@
+# O túnel da VM — agora servindo PRODUÇÃO.
+#
+# ⚠️ Este é o túnel `f0d7cd68`, que já existia na VM só para o Jenkins. O túnel
+# da estação (`47a05dc3`) NÃO foi movido de propósito.
+#
+# Um túnel Cloudflare é um ID, e o MESMO ID rodando em duas máquinas vira
+# réplica: a Cloudflare DIVIDE o tráfego entre as instâncias, por desenho, para
+# alta disponibilidade. Metade das requisições iria para cada máquina, nada
+# daria erro, e cada metade falaria com um banco diferente. Numa doação PIX,
+# metade dos pagamentos cairia de cada lado.
+#
+# Por isso a troca é de DNS, e não de túnel: os domínios passam a apontar para
+# este ID. O túnel da estação continua no ar, mas não recebe mais nada — e é
+# essa a volta, se precisar: repontar o DNS.
+tunnel: f0d7cd68-27da-4686-b826-4ce1d3a9243f
+credentials-file: /etc/cloudflared/f0d7cd68-27da-4686-b826-4ce1d3a9243f.json
+
+originRequest:
+  connectTimeout: 30s
+  noHappyEyeballs: true
+
+ingress:
+  # O Jenkins segue com destino próprio (nginx na 8081), fora do Traefik.
+  - hostname: jenkins.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8081
+
+  # ⚠️ Tudo o mais entra pelo Traefik do MicroK8s, na 80, e é ELE quem escolhe o
+  # serviço pelo `Host`. Por isso nenhuma destas linhas usa `httpHostHeader`:
+  # sobrescrever o Host aqui faria o Traefik procurar uma regra que não existe e
+  # devolver 404 — com a aplicação de pé, o que engana quem for depurar.
+  - hostname: urupix.com.br
+    service: http://127.0.0.1:80
+  - hostname: www.urupix.com.br
+    service: http://127.0.0.1:80
+  - hostname: urupix.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
+
+  - service: http_status:404
