@@ -57,6 +57,10 @@ SONAR_GENERICO = """
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
                         set -e
+                        # ⚠️ `pipefail`: sem ele, o `| tee` mais abaixo faz o
+                        # `set -e` enxergar o codigo do TEE, que sempre da certo.
+                        # Um scanner que falhasse passaria por sucesso.
+                        set -o pipefail
                         # ⚠️ --add-host: o conteiner do scanner tem /etc/hosts
                         # PROPRIO, entao `sonar.hmg` nao resolve nele nem com
                         # --network host. Sem isto o erro fala de DNS e manda a
@@ -65,7 +69,21 @@ SONAR_GENERICO = """
                         # ⚠️ Linha longa de proposito: contrabarra dentro deste
                         # bloco e erro de interpretacao do Groovy.
                         EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**"
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.scm.disabled=true
+                        # ⚠️ A saida do scanner e CAPTURADA, e o id da tarefa
+                        # sai dela -- nao do `.scannerwork/report-task.txt`.
+                        #
+                        # 🐞 O arquivo NAO aparece no espaco de trabalho: ele e
+                        # `drwxr-xr-x jenkins`, e o conteiner do scanner roda com
+                        # outro usuario. A analise funciona (ela sobe por HTTP),
+                        # mas o relatorio local nao pode ser gravado, e some com
+                        # o conteiner. O portao entao reprovava por falta de um
+                        # arquivo que nunca teria como existir.
+                        #
+                        # O proprio scanner imprime a URL da tarefa; ler dali nao
+                        # depende de permissao nenhuma.
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.scm.disabled=true 2>&1 | tee saida-sonar.txt
+                        grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
+                        echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
                 }
             }
@@ -94,7 +112,25 @@ SONAR_MAVEN = """
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
                         set -e
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-21 mvn -B -DskipTests compile org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE
+                        # ⚠️ `pipefail`: sem ele, o `| tee` mais abaixo faz o
+                        # `set -e` enxergar o codigo do TEE, que sempre da certo.
+                        # Um scanner que falhasse passaria por sucesso.
+                        set -o pipefail
+                        # ⚠️ A saida do scanner e CAPTURADA, e o id da tarefa
+                        # sai dela -- nao do `.scannerwork/report-task.txt`.
+                        #
+                        # 🐞 O arquivo NAO aparece no espaco de trabalho: ele e
+                        # `drwxr-xr-x jenkins`, e o conteiner do scanner roda com
+                        # outro usuario. A analise funciona (ela sobe por HTTP),
+                        # mas o relatorio local nao pode ser gravado, e some com
+                        # o conteiner. O portao entao reprovava por falta de um
+                        # arquivo que nunca teria como existir.
+                        #
+                        # O proprio scanner imprime a URL da tarefa; ler dali nao
+                        # depende de permissao nenhuma.
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-21 mvn -B -DskipTests compile org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
+                        echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
                 }
             }
@@ -117,6 +153,10 @@ PORTAO = """
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
                         set -e
+                        # ⚠️ `pipefail`: sem ele, o `| tee` mais abaixo faz o
+                        # `set -e` enxergar o codigo do TEE, que sempre da certo.
+                        # Um scanner que falhasse passaria por sucesso.
+                        set -o pipefail
 
                         # ================================================================
                         # 🐞 ESTE PORTAO JA FOI FAIL-OPEN, E PASSOU EM 0 SEGUNDOS
@@ -136,13 +176,15 @@ PORTAO = """
                         # que o token de analise PODE ler.
                         # ================================================================
 
-                        REL=.scannerwork/report-task.txt
-                        if [ ! -f "$REL" ]; then
-                            echo "ERRO: $REL nao existe -- a analise nao chegou a rodar."
+                        # O id vem da SAIDA do scanner, capturada no estagio
+                        # anterior. Ver a nota la sobre por que nao e o
+                        # `.scannerwork/report-task.txt`.
+                        if [ ! -s sonar-task.txt ]; then
+                            echo "ERRO: sonar-task.txt vazio -- a analise nao chegou a rodar."
                             exit 1
                         fi
-                        TAREFA=$(grep -E "^ceTaskId=" "$REL" | cut -d= -f2)
-                        [ -n "$TAREFA" ] || { echo "ERRO: sem ceTaskId em $REL"; exit 1; }
+                        TAREFA=$(cat sonar-task.txt)
+                        [ -n "$TAREFA" ] || { echo "ERRO: sem id de tarefa"; exit 1; }
                         echo "==> tarefa de analise: $TAREFA"
 
                         # 1. ESPERAR a analise ser PROCESSADA.
