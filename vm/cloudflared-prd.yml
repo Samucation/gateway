@@ -22,10 +22,10 @@
 # ===========================================================================
 # Migrado (serve do cluster, e sobrevive à estação desligada):
 #   urupix, sigma-midia, sprinklegames, opuschat, cafe-api, central-ia,
-#   veltrixa/ninjasystem
+#   veltrixa/ninjasystem, sigma-financeiro
 #
 # ⚠️ NAO migrado (o tunel devolve para a estacao pela rede local): quiz, api,
-# sigma-financeiro (e o -sandbox).
+# e o sigma-financeiro-SANDBOX (o de producao ja migrou).
 #
 # Esses continuam funcionando enquanto a estação estiver ligada, e SÓ esses caem
 # quando ela for desligada — o que é o comportamento desejado: cada um migra
@@ -80,9 +80,7 @@ ingress:
   - hostname: cafe-api.cursodetecnologia.dev.br
     service: http://127.0.0.1:80
   - hostname: sigma-financeiro.cursodetecnologia.dev.br
-    service: http://192.168.15.9:8050
-    originRequest:
-      httpHostHeader: sigma-financeiro.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
   - hostname: sigma-financeiro-sandbox.cursodetecnologia.dev.br
     service: http://192.168.15.9:3201
     originRequest:
