@@ -181,19 +181,13 @@ TESTES_NODE = """
                     export APP_AUTH_SECRET=$(openssl rand -hex 32)
                     export AUTH_SECRET=$APP_AUTH_SECRET
 
-                    # 🐞 Chaves VAPID (Web Push), pelo mesmo motivo.
+                    # Chaves VAPID (Web Push), para o `push-admin.ts` -- que e o
+                    # canal do painel administrativo.
                     #
-                    # `push-admin.ts` devolve `false` quando elas faltam -- e ai
-                    # NENHUMA entrega e criada. Dois testes de `aviso-de-live`
-                    # esperavam 1 entrega e recebiam 0, o que parece regra de
-                    # negocio quebrada e era so configuracao ausente.
-                    #
-                    # ⚠️ Esse comportamento do codigo esta CERTO ("sem chaves o
-                    # push e ignorado -- dev, maquina nova"). O que faltava era a
-                    # esteira fornecer chaves de teste.
-                    #
-                    # A propria biblioteca `web-push` as gera, e elas duram o
-                    # tempo da execucao.
+                    # ⚠️ NAO e o que faz `aviso-de-live` passar. Eu supus que
+                    # fosse e estava errado: aquele teste usa `pushToken`, que e
+                    # FCM (Firebase), tratado logo abaixo. As chaves ficam porque
+                    # outros caminhos as usam, e sao baratas de gerar.
                     # ⚠️ `grep -oE` + `cut`, e nao `sed` com grupo de captura:
                     # grupo de captura precisa de contrabarra, e contrabarra
                     # aqui dentro e erro de interpretacao do Groovy.
@@ -201,6 +195,25 @@ TESTES_NODE = """
                     export VAPID_PUBLIC_KEY=$(echo "$VAPID" | grep -oE '"publicKey":"[^"]+"' | cut -d'"' -f4)
                     export VAPID_PRIVATE_KEY=$(echo "$VAPID" | grep -oE '"privateKey":"[^"]+"' | cut -d'"' -f4)
                     export VAPID_SUBJECT="mailto:teste@exemplo.invalido"
+
+                    # 🐞 FCM: ESTA e a variavel que faltava de verdade.
+                    #
+                    # Dois testes de `aviso-de-live` esperavam 1 entrega e
+                    # recebiam 0. `src/lib/fcm.ts` devolve `null` sem
+                    # FCM_SERVICE_ACCOUNT_B64, e sem FCM configurado NENHUMA
+                    # NoticeDelivery e enfileirada.
+                    #
+                    # ⚠️ Lendo so a mensagem ("expected 1, got 0") aquilo parece
+                    # regra de negocio quebrada -- e o teste protege contra push
+                    # DUPLICADO, entao mexer nele seria estragar uma guarda boa.
+                    # Era configuracao ausente.
+                    #
+                    # A conta e FALSA e gerada agora: `project_id` termina em
+                    # `.invalido` de proposito, para nunca parecer credencial
+                    # real. A chave RSA e de verdade so para o JSON ser valido --
+                    # nenhum envio sai daqui, e se saisse iria para um projeto
+                    # que nao existe.
+                    export FCM_SERVICE_ACCOUNT_B64=$(node -e 'const c=require("crypto");const k=c.generateKeyPairSync("rsa",{modulusLength:2048,privateKeyEncoding:{type:"pkcs8",format:"pem"},publicKeyEncoding:{type:"spki",format:"pem"}});process.stdout.write(Buffer.from(JSON.stringify({type:"service_account",project_id:"teste-invalido",private_key_id:"teste",private_key:k.privateKey,client_email:"teste@teste-invalido.iam.gserviceaccount.com",client_id:"0",token_uri:"https://oauth2.googleapis.com/token"})).toString("base64"))')
 
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
