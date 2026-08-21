@@ -92,6 +92,34 @@ $PROJETOS = @(
     @{ Nome='central-portal'; Origem='central-db-portal'; User='central'; Db='central_portal'
        Ns='central-ia';       Pod='central-postgres-portal-0'; Secret='central-ia-secrets'
        Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+
+    # ---- acrescentados em 21/08/2026, durante o corte ----------------------
+    #
+    # ⚠️ FALTAVAM. A tabela cobria 7 bancos e o corte precisa de 11. Sem estes,
+    # apontar o trafego de `veltrixa` e `sprinklegames` para a VM entregaria
+    # BANCO VAZIO com a aplicacao de pe: loja sem produto, login recusando --
+    # e nenhuma mensagem dizendo "faltou migrar".
+    @{ Nome='veltrixa';     Origem='veltrixa-postgres'; User='veltrixa'; Db='veltrixa_db'
+       Ns='veltrixa';       Pod='veltrixa-postgres-0';  Secret='veltrixa-secrets'
+       Contar='select count(*)::text from information_schema.tables where table_schema not in (''pg_catalog'',''information_schema'')' }
+
+    # ⚠️ O Keycloak tem banco PROPRIO, e e nele que moram os USUARIOS. Migrar o
+    # veltrixa sem este deixaria a loja com os dados e ninguem conseguindo
+    # entrar -- e "senha invalida" nao faz ninguem pensar em migracao.
+    @{ Nome='veltrixa-keycloak'; Origem='veltrixa-keycloak-postgres'; User='keycloak'; Db='keycloak_db'
+       Ns='veltrixa';            Pod='veltrixa-keycloak-postgres-0';  Secret='veltrixa-secrets'
+       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+
+    # ⚠️ Fiscal: aqui moram os certificados digitais, cifrados pela
+    # NFE_VAULT_KEK. A chave tem que ser a MESMA dos dois lados -- com outra, os
+    # certificados viram bytes sem uso, e o erro so aparece na hora de emitir.
+    @{ Nome='veltrixa-nfe'; Origem='veltrixa-nfe-postgres'; User='nfe'; Db='nfe_db'
+       Ns='veltrixa';       Pod='veltrixa-nfe-postgres-0';  Secret='veltrixa-secrets'
+       Contar='select count(*)::text from information_schema.tables where table_schema not in (''pg_catalog'',''information_schema'')' }
+
+    @{ Nome='sprinklegames'; Origem='sprinklegames-postgres'; User='sprinkle'; Db='sprinklegames'
+       Ns='sprinklegames';   Pod='sprinklegames-postgres-0'; Secret='sprinklegames-secrets'
+       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
 )
 
 function Log($m) { Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m) }
