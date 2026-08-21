@@ -204,13 +204,45 @@ pipeline {{
                     # DESPEJA Pods, e a mensagem fala do Pod. Ja aconteceu aqui
                     # -- sete Pods, incluindo o proprio Sonar, que voltou 503 e
                     # derrubou a analise de outra esteira.
-                    LIVRE=$(df --output=pcent / | tail -1 | tr -dc '0-9')
-                    echo "==> disco em ${{LIVRE}}% antes de construir"
-                    if [ "$LIVRE" -gt 75 ]; then
-                        echo "==> acima de 75%: limpando o descartavel"
-                        docker builder prune -f --keep-storage=2GB 2>/dev/null | tail -1
+                    # ⚠️ O criterio e ESPACO LIVRE ABSOLUTO, e nao percentual.
+                    #
+                    # 🐞 A primeira versao limpava acima de 75%. Nao adiantou: o
+                    # build #23 comecou em 82%, a limpeza rodou, e ele chegou a
+                    # 97% MESMO ASSIM -- porque quem enche e o build, e o que
+                    # importa nao e a marca de onde ele parte, e sim se cabe o
+                    # que ele vai gerar. Um build deste porte ocupa ~10 GB entre
+                    # camadas, cache e o Postgres dos testes.
+                    #
+                    # Percentual tambem engana entre maquinas: 20% livres de 57 GB
+                    # sao 11 GB; de 20 GB sao 4 GB, e nao cabe.
+                    PISO_GB=12
+                    LIVRE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+                    echo "==> $LIVRE_GB GB livres antes de construir (piso: $PISO_GB GB)"
+                    if [ "$LIVRE_GB" -lt "$PISO_GB" ]; then
+                        echo "==> abaixo do piso: limpando o descartavel"
+                        # Volumes primeiro: sao 100% orfaos (Postgres de teste que
+                        # ficou para tras) e saem sem custo de recompilacao.
+                        docker volume prune -f 2>/dev/null | tail -1
+                        docker builder prune -f --keep-storage=1GB 2>/dev/null | tail -1
                         docker image prune -af 2>/dev/null | tail -1
-                        echo "==> disco agora: $(df --output=pcent / | tail -1 | tr -d ' ')"
+                        LIVRE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+                        echo "==> $LIVRE_GB GB livres agora"
+                    fi
+
+                    # ⚠️ FALHA CEDO em vez de derrubar o cluster.
+                    #
+                    # Num Kubernetes disco cheio nao da "sem espaco": o kubelet
+                    # DESPEJA Pods, e a mensagem fala do Pod. Ja aconteceu aqui --
+                    # sete Pods, incluindo o proprio Sonar, que voltou 503 e
+                    # derrubou a analise de OUTRA esteira.
+                    #
+                    # Entao, se nem limpando cabe, este build para agora. Um build
+                    # vermelho e um aborrecimento; um cluster despejado leva junto
+                    # o que nao tem nada a ver com ele.
+                    if [ "$LIVRE_GB" -lt 6 ]; then
+                        echo "ERRO: so $LIVRE_GB GB livres -- abaixo do minimo para construir."
+                        echo "Construir agora arriscaria fazer o kubelet despejar Pods."
+                        exit 1
                     fi
                 '''
             }}

@@ -89,8 +89,18 @@ TESTES_NODE = """
                     # aparecia no `docker logs`, nao no erro do passo -- entao
                     # sem o dump de log que este estagio faz, o sintoma seria
                     # apenas "nao subiu em 60 segundos".
+                    #
+                    # ⚠️ `-v` JUNTO. A imagem do Postgres declara `VOLUME` para o
+                    # diretorio de dados, entao cada `docker run` cria um volume
+                    # ANONIMO. `docker rm` sem `-v` remove o conteiner e ABANDONA
+                    # o volume: ~50 MB por rodada de teste que nada mais aponta.
+                    #
+                    # 🐞 Medido em 21/08/2026: 15 volumes orfaos, 739 MB. Eles nao
+                    # aparecem em `docker ps` nem em `docker images` -- so em
+                    # `docker system df`, na linha que ninguem le. Vazamento que
+                    # so aparece quando o disco acaba.
                     for velho in $(docker ps -aq --filter name=pg-teste 2>/dev/null); do
-                        docker rm -f "$velho" >/dev/null 2>&1 || true
+                        docker rm -fv "$velho" >/dev/null 2>&1 || true
                     done
 
                     # 🐞 Baixa a imagem ANTES, com repeticao.
@@ -132,7 +142,7 @@ TESTES_NODE = """
                     if [ "$pronto" != "1" ]; then
                         echo "ERRO: o Postgres de teste nao subiu em 60 segundos"
                         docker logs $PGC 2>&1 | tail -10
-                        docker rm -f $PGC >/dev/null 2>&1 || true
+                        docker rm -fv $PGC >/dev/null 2>&1 || true
                         exit 1
                     fi
 
@@ -217,7 +227,7 @@ TESTES_NODE = """
 
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
-                    docker rm -f $PGC >/dev/null 2>&1 || true
+                    docker rm -fv $PGC >/dev/null 2>&1 || true
                     echo "==> cobertura gerada em coverage/lcov.info"
                 '''
             }

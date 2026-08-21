@@ -7,3 +7,4 @@ console/ui/.angular/
 .tmp-console.log
 .tmp-console.err
 console/dados/
+__pycache__/
