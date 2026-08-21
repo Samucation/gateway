@@ -93,6 +93,30 @@ TESTES_NODE = """
                         docker rm -f "$velho" >/dev/null 2>&1 || true
                     done
 
+                    # 🐞 Baixa a imagem ANTES, com repeticao.
+                    #
+                    # O `Preparo` roda `docker image prune -af` para caber no
+                    # disco -- e isso apaga o `postgres:16-alpine`, que nao esta
+                    # em uso naquele momento. O `docker run` seguinte teria que
+                    # baixar sozinho, e uma baixa interrompida deixa o armazem
+                    # local INCONSISTENTE:
+                    #
+                    #     NotFound: content digest sha256:... not found
+                    #
+                    # Foi o que derrubou o build #15. E o erro engana: fala de
+                    # digest, parece corrupcao de registro remoto, e e so estado
+                    # local pela metade.
+                    #
+                    # Duas tentativas, e a segunda depois de apagar o resto
+                    # quebrado -- que e o que conserta o caso do digest.
+                    if ! docker pull postgres:16-alpine >/dev/null 2>&1; then
+                        echo "==> primeira baixa falhou; limpando o estado local e tentando de novo"
+                        docker image rm postgres:16-alpine >/dev/null 2>&1 || true
+                        docker pull postgres:16-alpine >/dev/null 2>&1 || {
+                            echo "ERRO: nao consegui baixar postgres:16-alpine"; exit 1;
+                        }
+                    fi
+
                     # ⚠️ Porta pela linha de comando do Postgres, porque com
                     # --network host o -p do Docker nao vale.
                     docker run -d --name $PGC --network host -e POSTGRES_USER=teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=postgres postgres:16-alpine -c port=$PGP >/dev/null
