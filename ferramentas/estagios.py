@@ -141,6 +141,22 @@ TESTES_NODE = """
                     # carregar; `generate` le o ESQUEMA e nunca abre conexao.
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx prisma generate
 
+                    # ⚠️ Segredos DE TESTE, gerados agora e jogados fora depois.
+                    #
+                    # 🐞 13 arquivos de teste morriam com "TOKEN_ENCRYPTION_KEY
+                    # ausente/invalida no .env". As aplicacoes recusam subir sem
+                    # eles -- e isso e correto -- mas na esteira nao ha `.env`.
+                    #
+                    # Gerados A CADA EXECUCAO, e nao fixos no repositorio: os
+                    # testes cifram e decifram dentro da mesma execucao, entao
+                    # qualquer valor valido serve. Chave fixa versionada pareceria
+                    # segredo de verdade, e alguem acabaria reusando em outro
+                    # lugar -- que e como um valor de teste vira credencial de
+                    # producao sem ninguem decidir isso.
+                    export TOKEN_ENCRYPTION_KEY=$(openssl rand -hex 32)
+                    export APP_AUTH_SECRET=$(openssl rand -hex 32)
+                    export AUTH_SECRET=$APP_AUTH_SECRET
+
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
                     docker rm -f $PGC >/dev/null 2>&1 || true
