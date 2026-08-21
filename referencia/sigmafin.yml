@@ -1,0 +1,178 @@
+# Kong DB-less na frente do Sigma Financeiro.
+#
+# ---------------------------------------------------------------------------
+# A divisão de responsabilidade, e por que ela não se inverte
+# ---------------------------------------------------------------------------
+# AUTENTICAÇÃO E AUTORIZAÇÃO SÃO DO SERVIÇO. O Kong não valida chave, não lê
+# escopo e não decide quem entra no admin. Só repassa.
+#
+# Não é preguiça: é que autenticação na borda é burlável por quem alcançar o
+# serviço por dentro — outro container na mesma rede, um port-forward
+# esquecido, um deploy que expôs a porta direto. Num serviço que move dinheiro
+# de terceiros, a regra tem que valer mesmo quando o gateway não está no
+# caminho. O serviço já recusa tudo sozinho; o Kong é uma camada A MAIS.
+#
+# O que É da borda: correlação de requisição, rate-limit global, CORS, métricas
+# e esconder a identidade do gateway. Coisas que não fazem sentido replicar
+# dentro de cada serviço.
+#
+# ---------------------------------------------------------------------------
+# As rotas são separadas por ÁREA de propósito
+# ---------------------------------------------------------------------------
+# Num balde só, o relatório diz "o serviço está lento" sem dizer onde. Separado,
+# dá para ver que quem está lento é a criação de cobrança (banco + adquirente)
+# e não a listagem. Kong casa o caminho MAIS ESPECÍFICO primeiro.
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: sigma-app
+    # O serviço roda na MÁQUINA (`npm start -p 3200`), não em container.
+    #
+    # 🐞 Lição herdada do Kong do live-flow (04/08/2026): lá o destino apontava
+    # para o nome do serviço do compose, que não resolvia de dentro do Kong
+    # porque o app não era container — e TODA requisição pública voltou 503
+    # enquanto a porta respondia normalmente na máquina.
+    url: http://host.docker.internal:3200
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    # 30s: criar cobrança fala com o adquirente. Mais curto que o timeout do
+    # adaptador (que já tem o seu) faria o Kong cortar uma cobrança que o
+    # adquirente ia aceitar — e aí existiria cobrança no provedor sem registro.
+    read_timeout: 30000
+
+    routes:
+      # ==================================================================
+      # WEBHOOK DOS ADQUIRENTES — o volume mais imprevisível
+      # ==================================================================
+      # Limite ALTO: um pico de pagamentos é normal, e recusar aqui faria o
+      # adquirente reentregar (barulho) ou desistir (dinheiro sem confirmar).
+      # A rota já é protegida por token e, mais importante, o serviço reconsulta
+      # o provedor — corpo forjado não vira pagamento.
+      - name: webhooks-adquirentes
+        paths: ["/api/webhooks"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 6000, policy: local, fault_tolerant: true }
+
+      # ==================================================================
+      # API PÚBLICA — o que os clientes consomem
+      # ==================================================================
+      # Limite por IP, não por chave: o Kong não sabe de chave (é o serviço que
+      # autentica). O limite POR APLICAÇÃO já existe lá dentro, no Postgres.
+      # Aqui é só o teto bruto contra quem entrou em laço.
+      - name: api-v1
+        paths: ["/api/v1"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET, POST, PATCH]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, hour: 40000, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # ==================================================================
+      # CRON — SÓ de dentro da máquina
+      # ==================================================================
+      # Quem alcança esta rota força entrega de webhook. Não é catastrófico, mas
+      # é carga gratuita para quem descobrir a URL. Ela é chamada por um
+      # agendador local, então a restrição de IP aqui não incomoda ninguém.
+      - name: cron
+        paths: ["/api/cron"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: ip-restriction
+            config:
+              allow: ["127.0.0.1", "::1", "172.16.0.0/12", "192.168.0.0/16"]
+
+      # ==================================================================
+      # ADMIN — alvo clássico
+      # ==================================================================
+      # A autorização é do APP (allowlist no código + 2FA obrigatório + sessão
+      # revogável). Na borda fica só o limite apertado, porque é aqui que
+      # alguém tentaria adivinhar senha e código de seis dígitos.
+      #
+      # NOTA: não há ip-restriction aqui de propósito. Ela bloquearia o próprio
+      # dono acessando de um IP residencial — foi exatamente o que aconteceu no
+      # Urupix quando o IP real do visitante passou a ser repassado.
+      - name: admin
+        paths: ["/admin", "/api/admin"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 120, policy: local, limit_by: ip }
+
+      # ==================================================================
+      # PORTAL PÚBLICO — formulário humano
+      # ==================================================================
+      - name: portal
+        paths: ["/portal", "/api/portal"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # Assets: muitos e muito rápidos. Juntos com as páginas, diluiriam a
+      # latência real e esconderiam onde está o gargalo.
+      - name: assets
+        paths: ["/_next", "/favicon.ico"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 6000, policy: local, fault_tolerant: true, limit_by: ip }
+
+      - name: raiz
+        paths: ["/"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+
+plugins:
+  # CORRELAÇÃO: o mesmo id acompanha a requisição do gateway até o log do
+  # serviço. Sem ele, investigar um pagamento é cruzar horário com sorte.
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid#counter
+      echo_downstream: true
+
+  # MÉTRICAS por rota — é o que transforma o gateway em ferramenta de
+  # diagnóstico em vez de só um proxy.
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+
+  # CORS fechado por padrão. Esta API é servidor-para-servidor: um `*` aqui
+  # convidaria integração pelo navegador, que significa chave de API dentro do
+  # JavaScript de alguém — ou seja, chave pública.
+  - name: cors
+    config:
+      origins: ["https://sigma.invalido"]
+      methods: [GET, POST, PATCH, OPTIONS]
+      headers: [Authorization, Content-Type, X-Sigma-Token]
+      credentials: false
+      max_age: 3600
+
+  # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+  # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+  # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+  # sem precisar de volume de requisicoes.
+  #
+  # 4 MB: aqui so trafega JSON de webhook de adquirente e chamada de API.
+  # Corpo maior que isso nao e uso, e este e o servico que move dinheiro.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 4
+      size_unit: megabytes

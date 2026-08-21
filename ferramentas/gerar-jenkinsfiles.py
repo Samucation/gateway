@@ -293,8 +293,20 @@ for p in PROJETOS:
         stage('Buscar o portal') {
             steps {
                 dir('_portal') {
+                    // 🐞 `github-ssh-samucation`, e nao `github-samucation`.
+                    //
+                    // O build #1 morreu com "Error cloning remote repo 'origin'"
+                    // -- mensagem que faz procurar problema de REDE ou de
+                    // permissao no GitHub. Nao era: a credencial simplesmente
+                    // NAO EXISTIA com aquele id.
+                    //
+                    // `github-samucation` e o id que a pasta de organizacao
+                    // espera para o TOKEN, que ainda nao foi criado. Enquanto o
+                    // acesso for por SSH, o id e este. Ao trocar para o token,
+                    // ver gateway/vm/DIVIDA-SEGURANCA.md -- esta linha muda
+                    // junto.
                     git branch: 'main',
-                        credentialsId: 'github-samucation',
+                        credentialsId: 'github-ssh-samucation',
                         url: 'git@github.com:Samucation/%s.git'
                 }
             }

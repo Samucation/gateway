@@ -1,0 +1,241 @@
+_format_version: "3.0"
+_transform: true
+
+# Kong DB-less na frente da Central.
+#
+# ---------------------------------------------------------------------------
+# Por que uma instância PRÓPRIA, e não a que já existe no live-flow
+# ---------------------------------------------------------------------------
+# A tentação é reaproveitar o Kong do Urupix — ele está no ar e é o mesmo
+# desenho. Mas a Central atende **vários** projetos: pendurada no gateway de
+# um deles, o dia em que o Kong do Urupix cair leva junto a voz do OpusChat e
+# de qualquer produto futuro. Uma dependência de N produtos sobre o gateway de
+# um só.
+#
+# O que foi reaproveitado é o que importa: o desenho. Divisão de papéis,
+# segmentação por área para diagnóstico, `host.docker.internal`, correlação,
+# e o `response-transformer` que não vaza cabeçalho interno — tudo copiado do
+# `live-flow/deploy/kong/kong.yml`, que já pagou essas lições.
+#
+# ---------------------------------------------------------------------------
+# A divisão de papéis (igual ao Urupix e ao Sigma)
+# ---------------------------------------------------------------------------
+#   * AUTENTICAÇÃO = do SERVIÇO. O Kong não valida a chave — só repassa. Deixar
+#     auth na borda a torna burlável por um gateway mal configurado.
+#   * BORDA = correlação, rate-limit global, CORS, métricas. O que não faz
+#     sentido replicar em cada serviço.
+#
+# ⚠️ E a **fila da placa não é do Kong**. O rate-limit daqui conta pedidos por
+# minuto; o que protege a GPU é o `PorteiroDaGpu` dentro do motor, que conta
+# chamadas SIMULTÂNEAS. São coisas diferentes: 600/min pode significar 600 ao
+# mesmo tempo no primeiro segundo. Ver Regra de Ouro §3.
+
+services:
+  # ── TRANSCRIÇÃO: pode demorar de verdade ────────────────────────────────
+  #
+  # Serviço à parte SÓ por causa do timeout. Um áudio de cinco minutos leva
+  # ~15 s para transcrever; com os 30 s do serviço normal ficaria apertado, e
+  # com os 60 s do padrão do Kong o cliente esperaria dobro do necessário para
+  # descobrir que caiu.
+  - name: central-transcricao
+    url: http://motor:3300
+    retries: 0 # 🐞 retry aqui é DINHEIRO: reenviar um áudio já transcrito
+    # cobraria os minutos duas vezes do cliente. Quem decide repetir é quem
+    # chamou, olhando o campo `retry` da recusa.
+    connect_timeout: 3000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: transcricoes
+        paths: ["/v1/audio/transcriptions"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+              # Por CHAVE, não por IP. Por IP seria errado nos dois sentidos:
+              # OpusChat e live-flow saem do mesmo host e dividiriam um limite
+              # que deveria ser de cada um; e um cliente atrás de NAT seria
+              # estrangulado pelos vizinhos.
+              limit_by: header
+              header_name: authorization
+
+  # ── SÍNTESE: rápida, e o cliente está esperando ─────────────────────────
+  - name: central-voz
+    url: http://motor:3300
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 15000
+    read_timeout: 15000
+    routes:
+      - name: fala
+        paths: ["/v1/audio/speech"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 1200
+              policy: local
+              fault_tolerant: true
+              limit_by: header
+              header_name: authorization
+
+  # ── TEXTO: modelo de linguagem demora mais ──────────────────────────────
+  - name: central-conversa
+    url: http://motor:3300
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 120000
+    read_timeout: 120000
+    routes:
+      - name: conversa
+        paths: ["/v1/chat/completions"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: true
+              limit_by: header
+              header_name: authorization
+
+  # ── SAÚDE: público, e de propósito ──────────────────────────────────────
+  #
+  # É o número que diz se vale crescer a placa. Métrica que exige login
+  # ninguém olha — e o objetivo dela é justamente ser olhada, inclusive por um
+  # monitor externo.
+  - name: central-saude
+    url: http://motor:3300
+    retries: 1
+    connect_timeout: 2000
+    read_timeout: 5000
+    routes:
+      - name: saude
+        paths: ["/health", "/v1/uso"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET]
+
+  # ── PORTAL: as telas ────────────────────────────────────────────────────
+  - name: central-portal
+    url: http://portal:3301
+    retries: 1
+    connect_timeout: 3000
+    read_timeout: 30000
+    routes:
+      # Autenticação primeiro, com limite apertado: é alvo clássico de força
+      # bruta, e o Kong casa o caminho mais específico antes.
+      - name: portal-entrada
+        paths: ["/portal/entrar", "/portal/criar-conta", "/portal/esqueci", "/api/portal", "/admin/entrar", "/api/admin/entrar", "/api/admin/dois-fatores"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 60, policy: local, limit_by: ip }
+
+      - name: portal-admin
+        paths: ["/admin", "/api/admin"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 300, policy: local, limit_by: ip }
+
+      - name: portal-resto
+        paths: ["/"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+
+# ⚠️ A rota `/admin/*` do MOTOR não está declarada em lugar nenhum aqui, de
+# propósito: ela não deve ser alcançável de fora. Quem fala com ela é o portal,
+# pela rede interna do compose. O motor ainda exige o segredo interno — não
+# expor é a primeira camada, e ela é de graça.
+#
+# Note que `portal-admin` acima aponta para o PORTAL (as telas), não para o
+# motor. Os dois usam o prefixo `/admin`, em processos diferentes.
+
+plugins:
+  # Correlação: o mesmo id atravessa Kong, motor e portal. Sem ele, investigar
+  # "a chamada das 19h02" significa cruzar relógios à mão.
+  - name: correlation-id
+    config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+
+  - name: cors
+    config:
+      origins:
+        - https://central-ia.cursodetecnologia.dev.br
+        - https://central-ia-sandbox.cursodetecnologia.dev.br
+        - http://localhost:3301
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: [Accept, Authorization, Content-Type, X-Request-Id]
+      exposed_headers: [X-Request-Id, Retry-After, X-Central-Destino, X-Central-Cobrado]
+      credentials: true
+      max_age: 3600
+
+  - name: prometheus
+    config:
+      per_consumer: false
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+  # Não vaza cabeçalho interno do Kong para o cliente.
+  - name: response-transformer
+    config:
+      # ⚠️ `replace` e nao `add` para o X-Frame-Options.
+      #
+      # O `shelf` do motor ja manda `SAMEORIGIN` por conta propria, e `add` so
+      # age quando o cabecalho NAO existe — seria um no-op silencioso, e o
+      # painel continuaria enquadravel pela propria origem. A mesma pegadinha
+      # ja documentada no Kong da plataforma.
+      replace:
+        headers:
+          - "X-Frame-Options: DENY"
+      add:
+        headers:
+          # ⚠️ O MESMO cabecalho aparece no `add` E no `replace` acima, e nao e
+          # duplicidade: `replace` so age quando ele JA existe, `add` so quando
+          # NAO existe. Com um so dos dois, metade das rotas fica descoberta.
+          #
+          # Medido em 14/08/2026: o `/health` (motor `shelf`, que manda
+          # SAMEORIGIN por conta propria) virava DENY corretamente, mas a
+          # pagina do PORTAL, que nao manda cabecalho nenhum, ficava SEM
+          # X-Frame-Options — justo a tela que tem sessao para roubar.
+          - "X-Frame-Options: DENY"
+
+          # A Central devolve JSON e AUDIO — nunca HTML. Se algum dia um erro
+          # nao tratado devolver markup, o navegador nao vai executa-lo.
+          - "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'"
+          - "X-Content-Type-Options: nosniff"
+          - "Referrer-Policy: no-referrer"
+          # Vale so sob HTTPS; posto para o dia do dominio real. Sem
+          # includeSubDomains nem preload: os dois sao dificeis de desfazer.
+          - "Strict-Transport-Security: max-age=31536000"
+      remove:
+        headers: [X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via]
+
+  # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+  # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+  # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+  # sem precisar de volume de requisicoes.
+  #
+  # 32 MB, folgado de proposito: a Central recebe AUDIO para transcricao por
+  # multipart e nao declara limite proprio. Teto apertado aqui quebraria
+  # transcricao de gravacao longa — e o sintoma seria 413 no meio da fala.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 32
+      size_unit: megabytes

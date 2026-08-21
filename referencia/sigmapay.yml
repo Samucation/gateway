@@ -1,0 +1,208 @@
+# Kong DB-less declarative config for Sigma Payments.
+#
+# Kong runs in DB-less mode: this file is the entire gateway state, no
+# admin-API mutation at runtime, no Postgres for Kong itself.
+#
+# Division of responsibility (see ADR-0013):
+#
+#   * **Authentication and authorization** are owned by the Sigma service
+#     itself (ADR-0009, Spring Security OAuth2 Resource Server). Kong
+#     does NOT validate JWTs here — Spring already does that and it is
+#     a strict requirement we don't want bypassable by a misconfigured
+#     gateway.
+#
+#   * **Gateway concerns** that don't make sense to bolt onto each
+#     service: correlation, rate limiting, CORS, edge metrics. Those
+#     are Kong's job.
+#
+# Plugin pipeline (per-request, priority-ordered):
+#
+#   correlation-id (global) → CORS (global) → IP-allow (admin route)
+#       → rate-limiting (per-route) → proxy → prometheus
+
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: sigma-payments
+    # 🐞 Era `http://app:8080` — o único upstream com nome genérico deste
+    # arquivo. Dentro do gateway compartilhado, `app` resolvia para o
+    # `plataforma-app` (o OpusChat), que também se chama `app` na rede dele:
+    # TODA chamada endereçada ao sigma-payments caía no serviço do vizinho.
+    #
+    # O sintoma enganava: 401, e não 502. Um 502 gritaria "não achei o
+    # serviço"; o 401 fez procurar credencial por horas antes de desconfiar
+    # do roteamento. Ninguém percebeu porque o app do sigma nunca subiu
+    # depois da migração — não havia com o que comparar.
+    #
+    # ⚠️ Upstream de gateway compartilhado NÃO pode ter nome genérico.
+    url: http://sigma-payments-app:8080
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      # --- Public webhook ingestion ----------------------------------
+      # No auth at the gateway. Webhook HMAC signature is verified
+      # inside the service (`IuguWebhookSignatureVerifier`). Rate-limit
+      # is set high enough to absorb Iugu retry storms but tight enough
+      # to drop a flood.
+      - name: webhooks
+        paths: ["/v1/webhooks"]
+        strip_path: false
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              fault_tolerant: true
+
+      # --- Customer endpoints ----------------------------------------
+      - name: customers
+        paths: ["/v1/customers"]
+        strip_path: false
+        methods: [GET, POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 30000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+
+      # --- Charges + refunds -----------------------------------------
+      - name: charges
+        paths: ["/v1/charges"]
+        strip_path: false
+        methods: [GET, POST]
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 30000
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
+
+      # --- Admin ------------------------------------------------------
+      # Authorization is enforced by Spring Security (`ROLE_ADMIN`),
+      # but the gateway adds belt-and-braces:
+      #   * Only callers from internal networks (10.0.0.0/8, the
+      #     compose network) get past the IP restriction.
+      #   * Tight rate limit — admin operations are rare; spikes are
+      #     a sign of script abuse or accident.
+      - name: admin
+        paths: ["/v1/admin"]
+        strip_path: false
+        plugins:
+          - name: ip-restriction
+            config:
+              allow:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+                - 127.0.0.1/32
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+
+      # --- Public health probes for upstream LBs ---------------------
+      - name: actuator-public
+        paths:
+          - /actuator/health
+          - /actuator/info
+        strip_path: false
+        methods: [GET]
+
+      # --- Swagger UI + OpenAPI JSON --------------------------------
+      # Convenience route for local-dev so integrators can browse the
+      # spec through the gateway. In production this route is typically
+      # disabled (or moved behind a separate "docs.sigma.veltora.com"
+      # subdomain with its own auth) — exposing the full surface of the
+      # API at the public edge is a recon goldmine.
+      - name: docs
+        paths:
+          - /swagger-ui
+          - /swagger-ui.html
+          - /v3/api-docs
+          - /webjars
+          - /openapi.yaml
+          - /openapi.yml
+        strip_path: false
+        methods: [GET]
+
+# --- Global plugins ----------------------------------------------------
+
+plugins:
+  # Correlation id — sets X-Request-Id if the client didn't, propagates
+  # upstream, echoes on the response. Sigma's RequestCorrelationWebFilter
+  # honours the inbound id, so the full chain (client → Kong → app →
+  # Kafka → log shipper) is joinable on a single id.
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid
+      echo_downstream: true
+
+  - name: cors
+    config:
+      origins:
+        - http://localhost:3000
+        - http://localhost:5173
+        - https://*.veltora.com
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers:
+        - Accept
+        - Authorization
+        - Content-Type
+        - Idempotency-Key
+        - X-Request-Id
+        - X-Signature
+      exposed_headers:
+        - Idempotency-Replay
+        - X-Request-Id
+        - X-RateLimit-Remaining
+        - Retry-After
+      credentials: true
+      max_age: 3600
+
+  - name: prometheus
+    config:
+      per_consumer: false
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+  # Strip Kong-specific headers from the upstream so the service doesn't
+  # see them in the request, and from the response so we don't leak
+  # gateway internals to clients.
+  - name: request-transformer
+    config:
+      remove:
+        headers:
+          - X-Consumer-Id
+          - X-Consumer-Username
+          - X-Credential-Identifier
+  - name: response-transformer
+    config:
+      remove:
+        headers:
+          - X-Kong-Upstream-Latency
+          - X-Kong-Proxy-Latency
+          - Via
+
+  # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+  # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+  # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+  # sem precisar de volume de requisicoes.
+  #
+  # 4 MB: API de pagamento, so JSON.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 4
+      size_unit: megabytes

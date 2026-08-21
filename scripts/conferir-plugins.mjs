@@ -27,9 +27,19 @@
 // rota, que é o que este script monta dos dois lados.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
-const WORKSPACE = path.resolve("..");
+// A raiz do PROPRIO repositorio -- e nao a pasta acima. Ver a nota na leitura
+// de `referencia/` mais abaixo: a base de comparacao mora aqui dentro, para o
+// script funcionar tanto na estacao quanto num agente de CI isolado.
+// ⚠️ `fileURLToPath`, e nao `new URL(...).pathname`.
+//
+// No Windows o `pathname` sai como `/E:/Desenvolvimento/...`, com barra
+// inicial, e o `path.resolve` seguinte trata isso como caminho relativo --
+// produzindo `E:\E:\Desenvolvimento\...` e um ENOENT que parece
+// arquivo faltando quando o problema e o caminho.
+const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const PROJETOS = [
   { id: "liveflow", config: "live-flow/deploy/kong/kong.yml" },
@@ -124,7 +134,25 @@ async function main() {
   let rotasOk = 0;
 
   for (const proj of PROJETOS) {
-    const original = parse(await readFile(path.join(WORKSPACE, proj.config), "utf8"));
+    // 🐞 A base de comparação vem de `referencia/`, e NÃO dos repositórios
+    // irmãos.
+    //
+    // Antes lia `../live-flow/deploy/kong/kong.yml` e companhia. Isso funciona
+    // na estação, onde todos os repositórios são irmãos numa pasta só — e falha
+    // no Jenkins, onde cada job tem espaço de trabalho próprio e não há irmão
+    // nenhum. O build do gateway morria com
+    // `ENOENT: /var/lib/jenkins/workspace/live-flow/deploy/kong/kong.yml`.
+    //
+    // Mas congelar não é só conveniência de CI: esta checagem prova que a
+    // migração para o Kong único não PERDEU plugin em relação ao que existia
+    // ANTES. Uma base que continua mudando permitiria enfraquecer os dois lados
+    // juntos e a comparação seguir verde — que é precisamente o que ela deveria
+    // impedir.
+    //
+    // ⚠️ Portanto `referencia/` é histórico. Só se mexe nele para corrigir uma
+    // cópia errada, nunca para "atualizar".
+    const congelado = path.join(RAIZ, "referencia", proj.id + ".yml");
+    const original = parse(await readFile(congelado, "utf8"));
     const antes = efetivosPorRota(original, { id: proj.id, filtrar: false });
     const depois = efetivosPorRota(gerado, { id: proj.id, filtrar: true });
 

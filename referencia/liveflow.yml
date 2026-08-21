@@ -1,0 +1,265 @@
+# Kong DB-less — config declarativa PRONTA para o dia da produção.
+#
+# Objetivo: provar que a camada de gateway entra SEM tocar no código do app. O app
+# já é gateway-ready (auth no serviço, lê forwarded headers, honra X-Request-Id via
+# src/proxy.ts, URLs por env). Ligar o Kong = subir este container + apontar os
+# subdomínios + setar as URLs base no .env. Nenhuma linha do app muda.
+#
+# Divisão (igual ao ADR-0013 do Sigma Payments Java):
+#   * AUTENTICAÇÃO/AUTORIZAÇÃO = do SERVIÇO (guardApiRequest / OAuth no app). O Kong
+#     NÃO valida token — só repassa. (Não deixar auth virar responsabilidade da borda
+#     e ser burlável por gateway mal configurado.)
+#   * Concerns de BORDA (que não faz sentido replicar em cada serviço): correlação,
+#     rate-limit GLOBAL, CORS, métricas. Isso é papel do Kong.
+_format_version: "3.0"
+_transform: true
+
+services:
+  # --- STREAMS (SSE) dos overlays: conexão fica ABERTA por horas. Serviço à parte
+  #     SÓ por causa do read_timeout longo — com os 30s do serviço normal, o
+  #     overlay do streamer cairia a cada 30 segundos. Sem buffer (SSE precisa
+  #     chegar na hora). ---
+  # 🐞 04/08/2026 — o destino era `http://app:3100`, o nome do serviço do
+  # docker-compose. Só que o app NÃO roda em container aqui: roda na máquina
+  # (`npm run build && npm start`, ver a regra de deploy). O nome `app` não
+  # resolvia dentro do Kong, e TODA requisição pública voltava 503 — o site
+  # inteiro fora do ar, enquanto a porta 3100 respondia normalmente.
+  # `host.docker.internal` é o host visto de dentro do container (o
+  # `extra_hosts: host-gateway` no compose garante isso fora do Docker Desktop).
+  - name: liveflow-sse
+    url: http://host.docker.internal:3100
+    retries: 0
+    connect_timeout: 3000
+    write_timeout: 3600000
+    read_timeout: 3600000 # 1h
+    routes:
+      - name: overlay-streams
+        paths: ["/api/overlay/stream", "/api/overlay/goal-stream"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET]
+        plugins:
+          # sem rate-limit apertado: o overlay reconecta sozinho e é 1 conexão
+          # longa por página (limitar aqui derrubaria live legítima).
+          - name: rate-limiting
+            config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+
+  - name: liveflow-app
+    url: http://host.docker.internal:3100 # o app roda na MÁQUINA, não em container
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      # --- Webhooks das operadoras (público; HMAC verificado no app) ---
+      - name: webhooks
+        paths: ["/api/webhooks"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 6000, policy: local, fault_tolerant: true }
+
+      # --- Health (público; sonda de LB/gateway) ---
+      - name: payments-health
+        paths: ["/api/payments/health"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET]
+
+      # --- OAuth token (público; rate-limit por IP anti-força-bruta) ---
+      - name: payments-oauth
+        paths: ["/api/payments/oauth"]
+        strip_path: false
+        preserve_host: true
+        methods: [POST]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # --- API pública de pagamentos (o app ainda checa auth+escopo+limite por app) ---
+      - name: payments-api
+        paths: ["/api/payments/v1"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET, POST]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 600, hour: 30000, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # --- Docs/Swagger: em prod, idealmente restringir ou mover p/ subdomínio
+      #     próprio (expor toda a superfície na borda é recon fácil). Aqui fica
+      #     liberado só p/ homologação; em prod, comente ou proteja. ---
+      - name: payments-docs
+        paths: ["/api/payments/docs", "/api/payments/openapi", "/payments-docs"]
+        strip_path: false
+        preserve_host: true
+        methods: [GET]
+
+      # --- Admin: autorização é do APP (allowlist dura + 2FA + break-glass). Na
+      #     borda fica só o rate-limit apertado. NOTA: a ip-restriction de redes
+      #     internas foi REMOVIDA de propósito — com o IP REAL do visitante ativo
+      #     (KONG_REAL_IP_HEADER=CF-Connecting-IP), ela bloquearia o próprio dono
+      #     acessando /admin por urupix.com.br (IP residencial ≠ rede interna). ---
+      - name: admin
+        paths: ["/admin", "/api/admin"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 120, policy: local, limit_by: ip }
+
+      # ===================================================================
+      # SEGMENTAÇÃO POR ÁREA DO PRODUTO — é isto que transforma o gateway em
+      # ferramenta de DIAGNÓSTICO. Sem separar, tudo cai num balde só e o
+      # relatório diz "o app está lento" sem dizer ONDE. Com estas rotas, a
+      # tela Admin → APIs → Gateway mostra latência/erros/volume POR ÁREA.
+      # Kong casa o caminho MAIS ESPECÍFICO primeiro; "/" fica por último.
+      # ===================================================================
+
+      # Assets estáticos: são muitos e muito rápidos — se ficassem juntos,
+      # diluiriam a latência real das páginas e esconderiam o gargalo.
+      - name: assets
+        paths: ["/_next", "/urupix", "/login-bg", "/consoles", "/store", "/vozes", "/favicon.ico", "/icon.png"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 6000, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # PÁGINA DE DOAÇÃO (/d/slug) — o coração do negócio: é onde o FÃ entra.
+      # Lentidão aqui = doação perdida. Merece métrica isolada.
+      - name: donate-page
+        paths: ["/d"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # API interna do Urupix (criar doação, status, painel…) — onde mora o
+      # trabalho pesado (banco + adquirente). Principal suspeito de gargalo.
+      - name: urupix-api
+        paths: ["/api/urupix"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # PAINEL DO STREAMER (uso logado, consultas mais pesadas: relatórios,
+      # analytics, carteira).
+      - name: dashboard
+        paths: ["/dashboard", "/api/analytics", "/api/reports"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # OVERLAYS do OBS (páginas do browser source; o STREAM fica no serviço
+      # liveflow-sse, com timeout longo).
+      - name: overlay-pages
+        paths: ["/overlay", "/api/overlay"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 2400, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # AUTENTICAÇÃO (login, 2FA, callbacks) — limite mais apertado: é alvo
+      # clássico de força-bruta.
+      - name: auth
+        paths: ["/login", "/2fa", "/api/auth", "/api/2fa"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 300, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # PORTAL DO DESENVOLVEDOR
+      - name: dev-portal
+        paths: ["/developers", "/api/developers"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 600, policy: local, fault_tolerant: true, limit_by: ip }
+
+      # --- Resto (landing, termos, páginas soltas) ---
+      - name: app-default
+        paths: ["/"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
+
+# --- Plugins GLOBAIS ---
+plugins:
+  # Correlation id — o app (src/proxy.ts) já honra o X-Request-Id de entrada, então
+  # a cadeia toda (cliente → Kong → app → logs) junta num id só.
+  - name: correlation-id
+    config: { header_name: X-Request-Id, generator: uuid, echo_downstream: true }
+
+  - name: cors
+    config:
+      origins:
+        - https://urupix.com.br
+        - https://urupix.cursodetecnologia.dev.br
+        - http://localhost:3100
+      methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      headers: [Accept, Authorization, Content-Type, Idempotency-Key, X-Request-Id]
+      exposed_headers: [X-Request-Id, Retry-After]
+      credentials: true
+      max_age: 3600
+
+  # bandwidth_metrics: liga o tráfego (entrada/saída) por rota — usado no relatório
+  # de CAPACIDADE do admin. per_consumer fica off: a autenticação é do app, então
+  # o Kong não conhece "quem" (a segmentação por aplicação vem do ApiAuditLog).
+  - name: prometheus
+    config:
+      per_consumer: false
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+  # Não vaza cabeçalhos internos do Kong pro cliente.
+  - name: response-transformer
+    config:
+      remove:
+        headers: [X-Kong-Upstream-Latency, X-Kong-Proxy-Latency, Via]
+
+  # As duas rotas públicas de pagamentos estavam SEM teto. `/api/payments/docs`
+  # tem o botão de experimentar, onde se cola credencial de verdade; e o
+  # `/health` é o alvo preferido de varredura porque responde barato e sempre.
+  - name: rate-limiting
+    route: payments-docs
+    config:
+      minute: 120
+      policy: local
+      limit_by: ip
+      fault_tolerant: true
+
+  - name: rate-limiting
+    route: payments-health
+    config:
+      # folgado: monitoramento legítimo bate aqui de minuto em minuto
+      minute: 600
+      policy: local
+      limit_by: ip
+      fault_tolerant: true
+
+  # Teto de corpo na borda. Medido em 14/08/2026: sem isto o gateway ACEITAVA
+  # 25 MB e repassava para a aplicacao — corpo grande vira memoria no processo
+  # antes de qualquer validacao, que e o jeito barato de derrubar um servico
+  # sem precisar de volume de requisicoes.
+  #
+  # 12 MB: o proprio app limita thumbnail em 8 MB (MAX_UPLOAD_BYTES em
+  # src/lib/thumbnails.ts) e o multipart soma algum cabecalho por cima.
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 12
+      size_unit: megabytes
