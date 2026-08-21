@@ -417,6 +417,40 @@ for p in PROJETOS:
         }
 """ % '\n'.join(blocos))
 
+    # ⚠️ ENTRE construir e testar, e nao so no fim.
+    #
+    # 🐞 O cache de build so serve DURANTE o `Construir`. Depois ele fica
+    # ocupando disco justamente enquanto rodam os testes e a analise -- que e
+    # quando o Sonar mais precisa de espaco.
+    #
+    # Medido em 21/08/2026, no build #25: o disco chegou a 95%% com a analise
+    # em curso, e sobraram 3,2 GB. Liberar o cache ali devolveu 6,6 GB de uma
+    # vez. No #23 a mesma situacao terminou com o Elasticsearch marcando os
+    # indices como somente-leitura e a analise morrendo -- sem nada de errado
+    # no codigo.
+    #
+    # ⚠️ Limpa o CACHE, nao as imagens: a imagem construida tem que sobreviver
+    # ate o `Publicar`, que vem depois do portao.
+    #
+    # So limpa se estiver apertado: cache quente e o que faz o proximo build
+    # ser rapido, e jogar fora a toa cobra minutos de todo mundo.
+    partes.append("""
+        stage('Liberar cache de build') {
+            steps {
+                sh '''
+                    LIVRE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+                    if [ "$LIVRE_GB" -lt 15 ]; then
+                        echo "==> $LIVRE_GB GB livres: soltando o cache antes de testar"
+                        docker builder prune -af 2>/dev/null | tail -1
+                        echo "==> agora: $(df -BG --output=avail / | tail -1 | tr -d ' ') livres"
+                    else
+                        echo "==> $LIVRE_GB GB livres: cache mantido, proximo build agradece"
+                    fi
+                '''
+            }
+        }
+""")
+
     pushes = '\n'.join("                    docker push $REGISTRO/%s:$TAG" % n
                        for n, _ in p['imagens'])
     partes.append("""
