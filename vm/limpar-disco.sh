@@ -152,6 +152,48 @@ if [ "$SECO" = "0" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# 4. IMAGENS DO CONTAINERD que nenhum Pod referencia.
+#
+# Este e o MAIOR consumidor, e faltava aqui. Medido em 21/08/2026: 6,2 GB, e o
+# disco caiu de 88% para 77% num passo so.
+#
+# ⚠️ E o containerd, e NAO o Docker. Sao dois armazens diferentes na mesma
+# maquina: o Docker constroi as imagens, o containerd e quem o Kubernetes usa
+# para RODAR. Limpar um nao toca no outro -- e os passos 1 a 3 acima so
+# mexiam no Docker.
+#
+# 🐞 As duas listas TEM que estar ordenadas antes do `comm`.
+#
+# A primeira versao disto, rodada a mao, comparou listas fora de ordem. O
+# `comm` avisou ("file 1 is not in sorted order") mas seguiu, e o resultado
+# incluiu `postgres:16-alpine`, `kafka:3.8.0` e `kong:3.8` -- imagens EM USO.
+# Elas foram removidas. Nada caiu na hora, porque o conteiner em execucao
+# segura as proprias camadas, mas qualquer reinicio passaria a exigir download
+# de novo. Foi sorte, nao cuidado.
+# ---------------------------------------------------------------------------
+if [ "$SECO" = "0" ]; then
+  log "imagens do containerd sem Pod que as referencie:"
+
+  microk8s kubectl get pods -A -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{range .spec.initContainers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null \
+    | grep -v '^$' | sort -u > /tmp/limpar-em-uso.txt
+
+  microk8s ctr --namespace k8s.io images ls -q 2>/dev/null \
+    | grep -v '^sha256:' | sort -u > /tmp/limpar-no-disco.txt
+
+  # `pause` fica de fora sempre: e a imagem que sustenta TODO Pod, e nao
+  # aparece em `spec.containers` de ninguem.
+  n=0
+  while read -r img; do
+    [ -z "$img" ] && continue
+    case "$img" in *pause*) continue ;; esac
+    microk8s ctr --namespace k8s.io images rm "$img" >/dev/null 2>&1 && n=$((n + 1))
+  done < <(comm -13 /tmp/limpar-em-uso.txt /tmp/limpar-no-disco.txt)
+
+  log "  $n imagem(ns) removida(s)"
+  rm -f /tmp/limpar-em-uso.txt /tmp/limpar-no-disco.txt
+fi
+
 depois=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
 log "disco depois: ${depois}G livres  (ganho: $((depois - antes))G)"
 
