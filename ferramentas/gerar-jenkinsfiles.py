@@ -105,7 +105,7 @@ PROJETOS = [
          deploys=['sigma-financeiro'],
          checa=[('sigma-financeiro.hmg', '/', '200')]),
 
-    dict(dir='live-flow', sonar='node', ns='urupix',
+    dict(dir='live-flow', sonar='node', testes='node', ns='urupix',
          imagens=[('urupix', '-t {REG}/urupix:$TAG .')],
          deploys=['urupix-app', 'urupix-redis'],
          # ⚠️ O urupix e o unico com dinheiro de terceiro. A verificacao confere
@@ -373,7 +373,16 @@ for p in PROJETOS:
     # O Sonar entra DEPOIS de construir e ANTES de publicar: nao adianta
     # empurrar para o registro uma imagem que o portao vai reprovar.
     sonar = {'maven': estagios.SONAR_MAVEN}.get(p.get('sonar'), estagios.SONAR_GENERICO)
-    partes.insert(len(partes) - 1, sonar + estagios.PORTAO)
+
+    # ⚠️ O estagio de TESTES so entra em quem tem `testes='node'`.
+    #
+    # Sem relatorio de cobertura o Sonar assume 0% e o portao reprova todo
+    # build -- entao ligar o portao sem ligar os testes e garantir vermelho
+    # eterno. Os dois andam juntos, por projeto, conforme cada um ganha a
+    # infraestrutura de teste na esteira.
+    testes = estagios.TESTES_NODE if p.get('testes') == 'node' else ''
+
+    partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
 
     partes.append(RODAPE.format(esperas=esperas, checagens=checagens,
                                 promocao=estagios.PROMOCAO))

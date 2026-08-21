@@ -44,6 +44,70 @@ chegaria a rodar.
 # credencial escrita no codigo. Nesses tres o retorno nao e "code smell": e
 # achar segredo vazado.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# TESTES COM COBERTURA (projetos Node)
+#
+# ⚠️ Isto e o que faz o portao de qualidade MEDIR alguma coisa.
+#
+# Sem relatorio de cobertura o Sonar assume 0%, e o portao padrao -- que exige
+# 80% em codigo NOVO -- reprova TODO build, por melhor que o codigo esteja. Foi
+# exatamente o que aconteceu com o live-flow nos builds #2 a #6: `Construir`
+# verde, `Portao de qualidade` vermelho, sempre.
+#
+# ⚠️ Os testes precisam de um POSTGRES. O `tests/global-setup.ts` cria um banco
+# descartavel, roda as migracoes e o apaga no fim -- ele so precisa de um
+# servidor onde possa executar CREATE DATABASE. Nenhum dado real e tocado, e o
+# proprio setup forca PAYOUTS_LIVE=false e REDIS_URL vazio.
+#
+# ⚠️ `--network host`, e NAO uma rede propria: criar rede no Docker REINICIA o
+# kubelite do MicroK8s (medido: 4 segundos de cluster fora do ar). Por isso o
+# Postgres sobe em porta alta no host.
+# ---------------------------------------------------------------------------
+TESTES_NODE = """
+        stage('Testes + cobertura') {
+            steps {
+                sh '''
+                    set -e
+                    set -o pipefail
+
+                    # Postgres DESCARTAVEL, so para esta execucao. O nome leva o
+                    # numero do build para duas execucoes nunca colidirem.
+                    PGC=pg-teste-$BUILD_NUMBER
+                    PGP=15432
+                    docker rm -f $PGC >/dev/null 2>&1 || true
+
+                    # ⚠️ Porta pela linha de comando do Postgres, porque com
+                    # --network host o -p do Docker nao vale.
+                    docker run -d --name $PGC --network host -e POSTGRES_USER=teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=postgres postgres:16-alpine -c port=$PGP >/dev/null
+
+                    # `pg_isready`, e nao porta TCP: a porta abre ANTES de o
+                    # Postgres aceitar conexao, e quem conectasse no intervalo
+                    # tomaria erro num servidor ja dado como pronto.
+                    pronto=0
+                    for i in $(seq 1 30); do
+                        if docker exec $PGC pg_isready -U teste -p $PGP >/dev/null 2>&1; then pronto=1; break; fi
+                        sleep 2
+                    done
+                    if [ "$pronto" != "1" ]; then
+                        echo "ERRO: o Postgres de teste nao subiu em 60 segundos"
+                        docker logs $PGC 2>&1 | tail -10
+                        docker rm -f $PGC >/dev/null 2>&1 || true
+                        exit 1
+                    fi
+
+                    # ⚠️ Nada de `|| true` aqui: teste que falha TEM que reprovar
+                    # o build. O conteiner e removido no `post`, que roda mesmo
+                    # quando este passo morre.
+                    npm ci --no-audit --no-fund --ignore-scripts
+                    DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
+
+                    docker rm -f $PGC >/dev/null 2>&1 || true
+                    echo "==> cobertura gerada em coverage/lcov.info"
+                '''
+            }
+        }
+"""
+
 SONAR_GENERICO = """
         // Analise estatica.
         //
@@ -81,7 +145,7 @@ SONAR_GENERICO = """
                         #
                         # O proprio scanner imprime a URL da tarefa; ler dali nao
                         # depende de permissao nenhuma.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.scm.disabled=true 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.scm.disabled=true -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
