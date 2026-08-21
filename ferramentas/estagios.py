@@ -303,6 +303,53 @@ SONAR_GENERICO = """
                         # `lcov.info`: aquilo entra por `lcov.reportPaths`, que e
                         # outro caminho.
                         EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**,**/generated/**,**/*.generated.*,coverage/**"
+
+                        # 🐞 SEPARAR TESTE DE CODIGO. Sem isto o Sonar trata o
+                        # arquivo de teste como codigo de producao e COBRA
+                        # COBERTURA DELE.
+                        #
+                        # Medido no live-flow em 21/08/2026, na conta do portao:
+                        #
+                        #   donate-page.tsx            29 linhas a cobrir
+                        #   miniatura-do-video.tsx     27
+                        #   tests/doacao-id-de-voz.ts  24   <-- o proprio teste
+                        #   proxy.ts                   13
+                        #
+                        # Um quarto da divida era o teste sendo cobrado de se
+                        # testar. Nao faz sentido: quem exercita o teste e ele
+                        # mesmo, e nenhum relator de cobertura instrumenta o
+                        # proprio arquivo de teste -- entao ele entra como 100%
+                        # descoberto e puxa a nota para baixo PARA SEMPRE.
+                        #
+                        # ⚠️ O efeito e perverso: escrever mais teste PIORAVA a
+                        # nota. Cada arquivo novo de teste chegava como divida.
+                        # Um portao que pune quem testa ensina a nao testar.
+                        #
+                        # `sonar.tests` marca a pasta como codigo DE TESTE: o
+                        # Sonar continua analisando (bug em teste e bug), mas
+                        # para de exigir cobertura dela.
+                        TST=""
+                        for d in tests test spec __tests__ src/test; do
+                            [ -d "$d" ] && TST="${TST:+$TST,}$d"
+                        done
+
+                        # ⚠️ A pasta tem que SAIR de fontes para ENTRAR como
+                        # teste. `sonar.sources=.` ja engloba `tests/`, e o Sonar
+                        # recusa indexar o mesmo arquivo duas vezes:
+                        #
+                        #   File tests/x.ts can't be indexed twice.
+                        #
+                        # `sonar.exclusions` vale para FONTES; `sonar.tests` e um
+                        # caminho separado, que a exclusao nao alcanca. Entao a
+                        # pasta sai de um lado e entra do outro.
+                        ARGS_TESTE=""
+                        if [ -n "$TST" ]; then
+                            ARGS_TESTE="-Dsonar.tests=$TST"
+                            for d in $(echo "$TST" | tr "," " "); do
+                                EXC="$EXC,$d/**"
+                            done
+                            echo "==> pastas de teste: $TST"
+                        fi
                         # ⚠️ A saida do scanner e CAPTURADA, e o id da tarefa
                         # sai dela -- nao do `.scannerwork/report-task.txt`.
                         #
@@ -315,7 +362,7 @@ SONAR_GENERICO = """
                         #
                         # O proprio scanner imprime a URL da tarefa; ler dali nao
                         # depende de permissao nenhuma.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" $ARGS_TESTE -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
