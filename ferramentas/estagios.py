@@ -246,9 +246,37 @@ SONAR_GENERICO = """
                         # --network host. Sem isto o erro fala de DNS e manda a
                         # pessoa procurar problema de rede que nao existe.
                         #
+                        # 🐞 E o `-Dsonar.scm.disabled=true` SAIU daqui.
+                        #
+                        # Com ele o Sonar nao consegue saber o que mudou, e passa
+                        # a tratar o repositorio INTEIRO como codigo novo. Medido
+                        # no build #18: `new_violations` = 37.548, quando o
+                        # commit mexia em um arquivo.
+                        #
+                        # ⚠️ Isso destroi a ideia toda do portao. Ele foi
+                        # desenhado para cobrar 80% do que voce ESCREVE agora,
+                        # nao do que ja existia -- e sem SCM as duas coisas viram
+                        # a mesma, tornando o corte impossivel de atingir e o
+                        # portao um vermelho permanente que se aprende a ignorar.
+                        #
                         # ⚠️ Linha longa de proposito: contrabarra dentro deste
                         # bloco e erro de interpretacao do Groovy.
-                        EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**"
+                        # 🐞 `**/generated/**` NAO PODE FALTAR.
+                        #
+                        # O `prisma generate` cria `src/generated/prisma`, que e
+                        # codigo GERADO e enorme. Sem excluir, medido no build
+                        # #18 do live-flow:
+                        #
+                        #   ncloc     107.061 -> 269.444 linhas
+                        #   violacoes            38.716
+                        #   cobertura   60,4%  ->   13,1%
+                        #
+                        # ⚠️ O pior nao e o numero feio: e a cobertura MENTIR
+                        # PARA BAIXO. O codigo escrito a mao tem 60% coberto, e o
+                        # painel diria 13% -- levando alguem a escrever teste
+                        # para um cliente de banco de dados que ninguem manteve
+                        # a mao.
+                        EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**,**/generated/**,**/*.generated.*"
                         # ⚠️ A saida do scanner e CAPTURADA, e o id da tarefa
                         # sai dela -- nao do `.scannerwork/report-task.txt`.
                         #
@@ -261,7 +289,7 @@ SONAR_GENERICO = """
                         #
                         # O proprio scanner imprime a URL da tarefa; ler dali nao
                         # depende de permissao nenhuma.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.scm.disabled=true -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
