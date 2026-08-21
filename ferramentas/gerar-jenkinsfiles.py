@@ -191,6 +191,27 @@ pipeline {{
                         echo "ERRO: registro $REGISTRO nao responde"; exit 1
                     fi
                     echo "==> registro ok"
+
+                    # ⚠️ LIMPA ANTES DE COMECAR, e nao so no fim.
+                    #
+                    # 🐞 O `post {{ always }}` limpa depois -- mas quem enche o
+                    # disco e o build que esta COMECANDO, e o espaco tem que
+                    # existir ANTES. Medido em 21/08/2026: um unico build do
+                    # live-flow levou o disco de 78% a 94% enquanto rodava, e
+                    # limpar so no fim chegava tarde.
+                    #
+                    # Num Kubernetes disco cheio nao da "sem espaco": o kubelet
+                    # DESPEJA Pods, e a mensagem fala do Pod. Ja aconteceu aqui
+                    # -- sete Pods, incluindo o proprio Sonar, que voltou 503 e
+                    # derrubou a analise de outra esteira.
+                    LIVRE=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+                    echo "==> disco em ${{LIVRE}}% antes de construir"
+                    if [ "$LIVRE" -gt 75 ]; then
+                        echo "==> acima de 75%: limpando o descartavel"
+                        docker builder prune -f --keep-storage=2GB 2>/dev/null | tail -1
+                        docker image prune -af 2>/dev/null | tail -1
+                        echo "==> disco agora: $(df --output=pcent / | tail -1 | tr -d ' ')"
+                    fi
                 '''
             }}
         }}
