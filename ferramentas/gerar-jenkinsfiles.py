@@ -180,7 +180,17 @@ pipeline {{
         // rodando?" -- duas builds do mesmo minuto colidem, e um rollback nao
         // sabe para onde voltar.
         TAG      = "${{env.GIT_COMMIT ? env.GIT_COMMIT.take(12) : 'local'}}"
-        KUBECTL  = 'microk8s kubectl'
+        // ⚠️ DOIS `kubectl`, porque agora sao DOIS clusters.
+        //
+        // `microk8s kubectl` fala SO com o cluster desta VM, que virou
+        // PRODUCAO. Homologacao mora na estacao, num cluster k3d, e so um
+        // kubectl avulso com kubeconfig proprio alcanca de la.
+        //
+        // 🐞 Usar `microk8s kubectl` para os dois era o que fazia a esteira
+        // DESFAZER producao: ela aplicava o overlay de homologacao no cluster
+        // de producao, e `urupix.com.br` voltava a ser `urupix.hmg`.
+        KUBECTL      = 'microk8s kubectl'
+        KUBECTL_HMG  = '/usr/local/bin/kubectl --kubeconfig=/var/lib/jenkins/.kube/config-hmg'
 
         SONAR_URL   = 'http://sonar.hmg'
         SONAR_CHAVE = '{dir}'
@@ -329,7 +339,7 @@ RODAPE = """
                     sed -i "s|newTag: .*|newTag: ${{A}}${{TAG}}${{A}}|" "$K"
                     grep -E "name: .*localhost|newTag" "$K" | sed "s/^/    /"
 
-                    $KUBECTL apply -k k8s/overlays/hmg
+                    $KUBECTL_HMG apply -k k8s/overlays/hmg
                 '''
             }}
         }}
@@ -371,8 +381,18 @@ RODAPE = """
                         exit 0
                     fi
                     falhou=0
+                    # ⚠️ O alvo e o Traefik da ESTACAO, e nao `127.0.0.1`.
+                    #
+                    # 🐞 `127.0.0.1` aqui e a propria VM -- que agora e
+                    # PRODUCAO. A verificacao de homologacao estaria medindo o
+                    # ambiente real e devolvendo verde por um deploy que
+                    # aconteceu em outro lugar. Verde falso e pior que vermelho.
+                    #
+                    # 8090 e a porta em que o cluster k3d da estacao publica o
+                    # Traefik (ver gateway/estacao/k3d-hmg.yaml).
+                    HMG_ENTRADA="${{HMG_ENTRADA:-http://192.168.15.9:8090}}"
                     checa() {{
-                        c=$(curl -s -o /dev/null -w "%{{http_code}}" -H "Host: $1" "http://127.0.0.1$2")
+                        c=$(curl -s -o /dev/null -w "%{{http_code}}" -H "Host: $1" "$HMG_ENTRADA$2")
                         if [ "$c" = "$3" ]; then echo "    ok   $1$2 -> $c"
                         else echo "    FALHA $1$2 -> $c (esperado $3)"; falhou=1; fi
                     }}
@@ -535,7 +555,7 @@ for p in PROJETOS:
 """ % pushes)
 
     esperas = '\n'.join(
-        '                    $KUBECTL rollout status -n $NS deploy/%s --timeout=600s' % d
+        '                    $KUBECTL_HMG rollout status -n $NS deploy/%s --timeout=600s' % d
         for d in p['deploys'])
     checagens = '\n'.join(
         '                    checa %s %s %s' % c for c in p['checa'])

@@ -42,9 +42,18 @@ agents: 0
 
 image: docker.io/rancher/k3s:v1.35.5-k3s1
 
+# ⚠️ Porta da API FIXA, e não a aleatória que o k3d escolhe.
+#
+# 🐞 Sem isto o k3d sorteia uma porta alta (saiu 49483 na primeira tentativa) e
+# ela MUDA a cada recriação do cluster. O Jenkins, que roda na VM e precisa
+# publicar aqui, teria um endereço que quebra sozinho — e o erro apareceria como
+# "conexão recusada", sem pista de que a porta trocou.
+kubeAPI:
+  hostPort: "6550"
+
 ports:
   # A porta 80 do Traefik do cluster sai em 8090 na estação. O túnel de
-  # homologação vai apontar para cá.
+  # homologação aponta para cá.
   #
   # ⚠️ Não é a 80: nesta máquina ela é disputada, e um conflito de porta em
   # cluster aparece como "o cluster subiu mas nada responde".
@@ -75,6 +84,28 @@ registries:
 options:
   k3s:
     extraArgs:
+      # ⚠️ O certificado da API precisa cobrir o ENDEREÇO DA REDE LOCAL.
+      #
+      # 🐞 Por padrão o k3d assina o certificado só para `localhost`,
+      # `127.0.0.1` e o IP interno do contêiner. O Jenkins roda NA VM e precisa
+      # publicar aqui — conectando por `192.168.15.9` ele levaria erro de TLS
+      # (`certificate is valid for ...`), que parece problema de credencial e é
+      # de certificado.
+      #
+      # ⚠️ Vários endereços porque esta estação também está em DHCP. É a mesma
+      # dívida da VM; o conserto de verdade é reserva no roteador.
+      - arg: --tls-san=192.168.15.9
+        nodeFilters:
+          - server:*
+      - arg: --tls-san=192.168.15.10
+        nodeFilters:
+          - server:*
+      - arg: --tls-san=192.168.15.11
+        nodeFilters:
+          - server:*
+      - arg: --tls-san=host.docker.internal
+        nodeFilters:
+          - server:*
       # ⚠️ O `servicelb` (Klipper) fica de fora: ele tenta abrir portas do HOST
       # para cada Service do tipo LoadBalancer, e nesta máquina isso colide com
       # o que já está no ar. O acesso entra pelo Ingress, que é como a VM faz.
