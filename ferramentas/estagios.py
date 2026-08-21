@@ -276,7 +276,23 @@ SONAR_GENERICO = """
                         # painel diria 13% -- levando alguem a escrever teste
                         # para um cliente de banco de dados que ninguem manteve
                         # a mao.
-                        EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**,**/generated/**,**/*.generated.*"
+                        # 🐞 E `coverage/**` tambem, pelo mesmo tipo de motivo.
+                        #
+                        # O relator `lcov` gera, junto com o `lcov.info`, um
+                        # relatorio HTML em `coverage/lcov-report/`. Sem excluir,
+                        # o Sonar ANALISA ESSE HTML e reclama dele:
+                        #
+                        #   [MAJOR] Remove this deprecated "name" attribute
+                        #           coverage/lcov-report/.../route.ts.html
+                        #
+                        # Duas violacoes "novas" que nao existem no codigo --
+                        # existem no relatorio SOBRE o codigo. E como reprovar o
+                        # aluno por causa da letra do boletim.
+                        #
+                        # ⚠️ Excluir da ANALISE nao afeta a leitura do
+                        # `lcov.info`: aquilo entra por `lcov.reportPaths`, que e
+                        # outro caminho.
+                        EXC="**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/.dart_tool/**,**/generated/**,**/*.generated.*,coverage/**"
                         # ⚠️ A saida do scanner e CAPTURADA, e o id da tarefa
                         # sai dela -- nao do `.scannerwork/report-task.txt`.
                         #
