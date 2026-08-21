@@ -64,6 +64,24 @@ $ProgressPreference    = 'SilentlyContinue'
 # de propósito: contar linhas de `_prisma_migrations` provaria só que a migração
 # rodou. O que importa é o dado de gente — usuário, pedido, ativo.
 # ---------------------------------------------------------------------------
+# ⚠️ A CONFERENCIA CONTA LINHAS, E NAO TABELAS.
+#
+# 🐞 Contava tabelas ate 21/08/2026, e isso e um teste que NAO TESTA NADA: a
+# aplicacao roda as migracoes na partida e cria o esquema sozinha. As tabelas
+# aparecem no destino tendo o dump chegado ou nao.
+#
+# Foi assim que dois projetos passaram como "CONFERE" com o banco vazio:
+#
+#   sprinklegames  13 tabelas = 13 tabelas, e 101 linhas contra ZERO
+#                  (o pg_restore falhava: dump do PG 17, restore do PG 16)
+#   veltrixa       63 tabelas = 63 tabelas, e app_user 10->0, cart 3->0,
+#                  company 6->1
+#
+# O portal do sprinklegames ficou NO AR servindo banco vazio, e o sintoma que
+# apareceu para o dono foi "algumas imagens estao faltando".
+#
+# ⚠️ Somar linhas de TODAS as tabelas e mais lento, e e o preco de a conferencia
+# significar alguma coisa.
 $PROJETOS = @(
     @{ Nome='urupix';       Origem='liveflow-db';       User='liveflow';   Db='liveflow'
        Ns='urupix';         Pod='urupix-postgres-0';    Secret='urupix-secrets'
@@ -71,27 +89,27 @@ $PROJETOS = @(
 
     @{ Nome='opuschat';     Origem='opuschat-db';       User='plataforma'; Db='plataforma'
        Ns='opuschat';       Pod='opuschat-postgres-0';  Secret='opuschat-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='plataforma';   Origem='plataforma-db';     User='plataforma'; Db='plataforma'
        Ns='plataforma';     Pod='plataforma-postgres-0'; Secret='plataforma-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='sigmafin';     Origem='sigma-db';          User='sigma';      Db='sigma_financeiro'
        Ns='sigma-financeiro'; Pod='sigma-db-0';         Secret='sigma-financeiro-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='sigmafin-sbx'; Origem='sigma-db-sandbox';  User='sigma';      Db='sigma_financeiro_sandbox'
        Ns='sigma-financeiro'; Pod='sigma-db-sandbox-0'; Secret='sigma-financeiro-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='central-motor';  Origem='central-db-motor';  User='central'; Db='central'
        Ns='central-ia';       Pod='central-postgres-motor-0'; Secret='central-ia-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='central-portal'; Origem='central-db-portal'; User='central'; Db='central_portal'
        Ns='central-ia';       Pod='central-postgres-portal-0'; Secret='central-ia-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     # ---- acrescentados em 21/08/2026, durante o corte ----------------------
     #
@@ -101,25 +119,25 @@ $PROJETOS = @(
     # e nenhuma mensagem dizendo "faltou migrar".
     @{ Nome='veltrixa';     Origem='veltrixa-postgres'; User='veltrixa'; Db='veltrixa_db'
        Ns='veltrixa';       Pod='veltrixa-postgres-0';  Secret='veltrixa-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema not in (''pg_catalog'',''information_schema'')' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     # ⚠️ O Keycloak tem banco PROPRIO, e e nele que moram os USUARIOS. Migrar o
     # veltrixa sem este deixaria a loja com os dados e ninguem conseguindo
     # entrar -- e "senha invalida" nao faz ninguem pensar em migracao.
     @{ Nome='veltrixa-keycloak'; Origem='veltrixa-keycloak-postgres'; User='keycloak'; Db='keycloak_db'
        Ns='veltrixa';            Pod='veltrixa-keycloak-postgres-0';  Secret='veltrixa-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     # ⚠️ Fiscal: aqui moram os certificados digitais, cifrados pela
     # NFE_VAULT_KEK. A chave tem que ser a MESMA dos dois lados -- com outra, os
     # certificados viram bytes sem uso, e o erro so aparece na hora de emitir.
     @{ Nome='veltrixa-nfe'; Origem='veltrixa-nfe-postgres'; User='nfe'; Db='nfe_db'
        Ns='veltrixa';       Pod='veltrixa-nfe-postgres-0';  Secret='veltrixa-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema not in (''pg_catalog'',''information_schema'')' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 
     @{ Nome='sprinklegames'; Origem='sprinklegames-postgres'; User='sprinkle'; Db='sprinklegames'
        Ns='sprinklegames';   Pod='sprinklegames-postgres-0'; Secret='sprinklegames-secrets'
-       Contar='select count(*)::text from information_schema.tables where table_schema=''public''' }
+       Contar='select coalesce(sum(c),0)::text from (select (xpath(''/row/c/text()'', query_to_xml(format(''select count(*) as c from %I.%I'', schemaname, tablename), false, true, '''')))[1]::text::bigint as c from pg_tables where schemaname not in (''pg_catalog'',''information_schema'')) t' }
 )
 
 function Log($m) { Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m) }
