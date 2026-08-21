@@ -121,6 +121,26 @@ TESTES_NODE = """
                     # deixava o Postgres de pe e o build SEGUINTE nao conseguia
                     # subir o dele.
                     npm ci --no-audit --no-fund --ignore-scripts
+
+                    # 🐞 `prisma generate` EXPLICITO, por causa do
+                    # `--ignore-scripts`.
+                    #
+                    # O cliente do Prisma e codigo GERADO, e quem o gera e um
+                    # script de pos-instalacao -- exatamente o que
+                    # `--ignore-scripts` pula. (E o `--ignore-scripts` existe
+                    # porque o npm 11 exige aprovacao interativa para esses
+                    # scripts, e dentro da esteira nao ha ninguem para aprovar.)
+                    #
+                    # Sem esta linha, 52 dos 102 arquivos de teste morrem no
+                    # import com "Cannot find package '@/generated/prisma/client'"
+                    # -- e o sintoma engana: parece teste quebrado, e e biblioteca
+                    # ausente. Na maquina de quem desenvolve nao aparece, porque
+                    # o cliente ja foi gerado alguma vez.
+                    #
+                    # ⚠️ O DATABASE_URL aqui e so para a configuracao do Prisma
+                    # carregar; `generate` le o ESQUEMA e nunca abre conexao.
+                    DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx prisma generate
+
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
                     docker rm -f $PGC >/dev/null 2>&1 || true
