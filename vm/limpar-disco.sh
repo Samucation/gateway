@@ -143,7 +143,8 @@ for repo in $(curl -s http://$REG/v2/_catalog | tr ',' '\n' | tr -d '{}[]"' | se
     dig=$(curl -sS -o /dev/null -D - \
           -H "Accept: $ACEITA" \
           "http://$REG/v2/$repo/manifests/$t" 2>/dev/null \
-          | grep -i '^docker-content-digest:' | tr -d '' | awk '{print $2}' || true)
+          | grep -i '^docker-content-digest:' | tr -d '
+' | awk '{print $2}' || true)
     [ -z "$dig" ] && continue
     if [ "$SECO" = "1" ]; then
       log "  (seco) apagaria $repo:$t"
@@ -189,11 +190,27 @@ fi
 if [ "$SECO" = "0" ]; then
   log "imagens do containerd sem Pod que as referencie:"
 
+  # 🐞 `LC_ALL=C` nos DOIS `sort` E no `comm`. Nao basta `sort -u`.
+  #
+  # `sort` ordena pela regra de colacao do IDIOMA; `comm` compara em ordem de
+  # BYTE. Com locale pt_BR os dois discordam, e o `comm` avisa
+  # "file is not in sorted order" -- e SEGUE ASSIM MESMO, devolvendo lixo.
+  #
+  # Aconteceu DUAS vezes neste ambiente, e nas duas o resultado apontou imagens
+  # EM USO (postgres, kafka, kong) como orfas. Elas foram removidas. Nada caiu
+  # na hora, porque conteiner em execucao segura as proprias camadas -- mas
+  # qualquer reinicio passaria a exigir download de novo. Foi sorte, nao
+  # cuidado.
+  #
+  # ⚠️ Na segunda vez eu ja tinha "corrigido" isto acrescentando `sort -u`. O
+  # aviso do `comm` continuou aparecendo e eu nao o li. O aviso ESTAVA CERTO.
+  #
+  # Com `LC_ALL=C` a mesma comparacao devolve zero orfas quando nao ha orfas.
   microk8s kubectl get pods -A -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{range .spec.initContainers[*]}{.image}{"\n"}{end}{end}' 2>/dev/null \
-    | grep -v '^$' | sort -u > /tmp/limpar-em-uso.txt
+    | grep -v '^$' | LC_ALL=C sort -u > /tmp/limpar-em-uso.txt
 
   microk8s ctr --namespace k8s.io images ls -q 2>/dev/null \
-    | grep -v '^sha256:' | sort -u > /tmp/limpar-no-disco.txt
+    | grep -v '^sha256:' | LC_ALL=C sort -u > /tmp/limpar-no-disco.txt
 
   # `pause` fica de fora sempre: e a imagem que sustenta TODO Pod, e nao
   # aparece em `spec.containers` de ninguem.
@@ -202,7 +219,7 @@ if [ "$SECO" = "0" ]; then
     [ -z "$img" ] && continue
     case "$img" in *pause*) continue ;; esac
     microk8s ctr --namespace k8s.io images rm "$img" >/dev/null 2>&1 && n=$((n + 1))
-  done < <(comm -13 /tmp/limpar-em-uso.txt /tmp/limpar-no-disco.txt)
+  done < <(LC_ALL=C comm -13 /tmp/limpar-em-uso.txt /tmp/limpar-no-disco.txt)
 
   log "  $n imagem(ns) removida(s)"
   rm -f /tmp/limpar-em-uso.txt /tmp/limpar-no-disco.txt
