@@ -255,6 +255,40 @@ RODAPE = """
             steps {{
                 sh '''
                     set -e
+                    # ⚠️ ESTE CLUSTER VIROU PRODUCAO -- nao recebe mais hmg.
+                    #
+                    # 🐞 Em 21/08/2026, durante o corte, este estagio DESFEZ a
+                    # configuracao de producao. A esteira aplicou o overlay de
+                    # homologacao as 20:48 e o Ingress voltou de `urupix.com.br`
+                    # para `urupix.hmg` -- o dominio publico passou a dar 404 com
+                    # a aplicacao de pe.
+                    #
+                    # ⚠️ Nao foi acidente de configuracao: enquanto a esteira
+                    # publicar homologacao no cluster que virou producao, ela vai
+                    # desfazer producao A CADA BUILD, e o estrago aparece minutos
+                    # depois de alguem mexer em qualquer projeto.
+                    #
+                    # `HMG_CONTEXTO` vazio = nao ha ambiente de homologacao ainda.
+                    # Quando a estacao virar hmg, definir a variavel no Jenkins
+                    # (Gerenciar > Sistema > variaveis de ambiente) apontando para
+                    # o contexto de la, e este estagio volta a valer.
+                    if [ -z "$HMG_CONTEXTO" ]; then
+                        echo "======================================================"
+                        echo " HOMOLOGACAO NAO TEM DESTINO -- nada foi implantado."
+                        echo "======================================================"
+                        echo
+                        echo " Este cluster e PRODUCAO desde o corte. Aplicar o"
+                        echo " overlay de hmg aqui derruba o ambiente real: foi o"
+                        echo " que aconteceu em 21/08/2026, quando o Ingress voltou"
+                        echo " de urupix.com.br para urupix.hmg."
+                        echo
+                        echo " A imagem FOI construida, testada e publicada no"
+                        echo " registro -- so nao foi implantada."
+                        echo
+                        echo " Para religar: definir HMG_CONTEXTO no Jenkins com o"
+                        echo " contexto do cluster de homologacao."
+                        exit 0
+                    fi
                     # A tag entra pelo OVERLAY, e NAO por `kubectl set image`.
                     #
                     # `set image` e imperativo: o `apply` seguinte devolve o
@@ -286,6 +320,13 @@ RODAPE = """
             steps {{
                 sh '''
                     set -e
+                    # Mesmo motivo do estagio de implantar: sem destino de
+                    # homologacao, medir este cluster seria medir PRODUCAO e
+                    # devolver verde por um deploy que nao aconteceu.
+                    if [ -z "$HMG_CONTEXTO" ]; then
+                        echo "==> homologacao sem destino: nada a verificar"
+                        exit 0
+                    fi
 {esperas}
                 '''
             }}
@@ -300,6 +341,13 @@ RODAPE = """
             steps {{
                 sh '''
                     set -e
+                    # Mesmo motivo do estagio de implantar: sem destino de
+                    # homologacao, medir este cluster seria medir PRODUCAO e
+                    # devolver verde por um deploy que nao aconteceu.
+                    if [ -z "$HMG_CONTEXTO" ]; then
+                        echo "==> homologacao sem destino: nada a verificar"
+                        exit 0
+                    fi
                     falhou=0
                     checa() {{
                         c=$(curl -s -o /dev/null -w "%{{http_code}}" -H "Host: $1" "http://127.0.0.1$2")
