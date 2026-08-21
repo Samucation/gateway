@@ -29,8 +29,42 @@ erro seria silencioso.
 
 Os dois carimbados `live` na tabela `Settings`.
 
-⚠️ `AppDoAdquirente = 0` NÃO é falha da migração — é o estado real da produção.
-Sem adquirente cadastrado, uma cobrança não completa em NENHUM dos dois.
+⚠️ `AppDoAdquirente = 0` NÃO significa "sem Mercado Pago" — eu li isso errado
+primeiro e disse ao dono que faltava cadastrar adquirente. Estava errado.
+
+A credencial do adquirente mora em **`Receiver.credentialsEnc`**, cifrada, POR
+RECEBEDOR. `AppDoAdquirente` é outra coisa (registro de aplicação OAuth).
+
+    label                                | provider     | própria | tem cred | ativo
+    Plataforma Urupix (conta da casa)    | MERCADO_PAGO |    t    |     t    |   t
+    Samuel "Ed Sheeran dos Games"        | MERCADO_PAGO |    f    |     t    |   t
+
+Idênticos nos dois lados.
+
+## 2b. As credenciais do Mercado Pago decifram na VM — prova sem cobrar ninguém
+
+A decifragem só acontece ao CRIAR COBRANÇA (`aplicacao/criar-cobranca.ts`) e ao
+confirmar pagamento — os dois caminhos movem dinheiro de verdade. Não há
+endpoint de "testar credencial".
+
+Então a prova é por determinismo, e não por experimento: cifra simétrica com a
+MESMA chave sobre o MESMO texto cifrado devolve o MESMO texto claro.
+
+    chave (SHA-256, 16 primeiros):
+      estação: 520d216206de054f
+      VM     : 520d216206de054f
+
+    texto cifrado (MD5 de credentialsEnc):
+      Plataforma Urupix (conta da casa):  d1d57554090a926303558e912cfd40e9  (os dois)
+      Samuel "Ed Sheeran dos Games":      12417a3de46d88190d4ea1dc3beb004e  (os dois)
+
+E o token que o Urupix usa direto com o Mercado Pago, fora do sigma, também
+confere — MP_ACCESS_TOKEN, MP_CLIENT_ID, MP_CLIENT_SECRET e MP_WEBHOOK_SECRET,
+todos com a mesma impressão dos dois lados.
+
+⚠️ O que NÃO foi feito: criar uma cobrança de verdade. Em `live` isso é dinheiro
+real, e a regra do dono é testar só em sandbox. A prova acima dá certeza sem
+precisar disso.
 
 ## 3. Chamada autenticada, com a credencial que o Urupix usa
 
@@ -67,6 +101,6 @@ responde 401 sem assinatura — vivo e protegido.
 
 Não é da migração: já faltava aqui.
 
-- **Nenhum adquirente cadastrado** (`AppDoAdquirente` vazio). Enquanto isso, o
-  serviço está `live` mas sem provedor para executar a cobrança.
-- Credencial de sandbox do Mercado Pago, para dar para testar sem dinheiro real.
+- Credencial de SANDBOX do Mercado Pago. Sem ela não há como exercitar o fluxo
+  de cobrança de ponta a ponta sem dinheiro real — e é a única coisa que separa
+  "provado por determinismo" de "provado por uma doação que entrou".
