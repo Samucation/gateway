@@ -21,10 +21,11 @@
 # O QUE MORA AQUI E O QUE AINDA MORA NA ESTAÇÃO
 # ===========================================================================
 # Migrado (serve do cluster, e sobrevive à estação desligada):
-#   urupix, sigma-midia, sprinklegames
+#   urupix, sigma-midia, sprinklegames, opuschat, cafe-api, central-ia,
+#   veltrixa/ninjasystem
 #
-# ⚠️ NÃO migrado (o túnel devolve para a estação pela rede local): quiz, api,
-# veltrixa/ninjasystem, opuschat, cafe-api, sigma-financeiro, central-ia.
+# ⚠️ NAO migrado (o tunel devolve para a estacao pela rede local): quiz, api,
+# sigma-financeiro (e o -sandbox).
 #
 # Esses continuam funcionando enquanto a estação estiver ligada, e SÓ esses caem
 # quando ela for desligada — o que é o comportamento desejado: cada um migra
@@ -77,7 +78,7 @@ ingress:
     service: http://127.0.0.1:80
 
   - hostname: cafe-api.cursodetecnologia.dev.br
-    service: http://192.168.15.9:8050
+    service: http://127.0.0.1:80
   - hostname: sigma-financeiro.cursodetecnologia.dev.br
     service: http://192.168.15.9:8050
     originRequest:
@@ -87,45 +88,24 @@ ingress:
     originRequest:
       httpHostHeader: sigma-financeiro-sandbox.cursodetecnologia.dev.br
   - hostname: opuschat.cursodetecnologia.dev.br
-    service: http://192.168.15.9:8050
-    originRequest:
-      httpHostHeader: opuschat.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
   - hostname: central-ia.cursodetecnologia.dev.br
-    service: http://192.168.15.9:8030
-    originRequest:
-      httpHostHeader: central-ia.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
   - hostname: central-ia-sandbox.cursodetecnologia.dev.br
     service: http://192.168.15.9:8030
     originRequest:
       httpHostHeader: central-ia-sandbox.cursodetecnologia.dev.br
 
   - hostname: ninjasystem.cursodetecnologia.dev.br
-    service: http://192.168.15.9:4201
-    originRequest:
-      httpHostHeader: ninjasystem.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
   - hostname: veltrixa.cursodetecnologia.dev.br
-    service: http://192.168.15.9:4201
-    originRequest:
-      httpHostHeader: veltrixa.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
   - hostname: ninjasystem-admin.cursodetecnologia.dev.br
-    service: http://192.168.15.9:4200
-    originRequest:
-      httpHostHeader: ninjasystem-admin.cursodetecnologia.dev.br
-  # ⚠️ As três regras do auth vêm NA ORDEM, e a ordem é o que as faz valer: as
-  # duas primeiras liberam só o realm do Veltrixa e os estáticos; a terceira
-  # fecha o resto com 404. Invertidas, a de 404 casaria primeiro e o Keycloak
-  # ficaria inacessível.
+    service: http://127.0.0.1:80
+  # ⚠️ As tres regras de caminho sairam: quem restringe agora e o Ingress do
+  # cluster, que expoe so o Keycloak nesse host. Manter a divisao aqui seria uma
+  # segunda lista para esquecer de atualizar.
   - hostname: ninjasystem-auth.cursodetecnologia.dev.br
-    path: ^/realms/veltrixa(/.*)?$
-    service: http://192.168.15.9:8085
-    originRequest:
-      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
-  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
-    path: ^/resources/.*
-    service: http://192.168.15.9:8085
-    originRequest:
-      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
-  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
-    service: http_status:404
+    service: http://127.0.0.1:80
 
   - service: http_status:404
