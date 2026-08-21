@@ -157,6 +157,27 @@ TESTES_NODE = """
                     export APP_AUTH_SECRET=$(openssl rand -hex 32)
                     export AUTH_SECRET=$APP_AUTH_SECRET
 
+                    # 🐞 Chaves VAPID (Web Push), pelo mesmo motivo.
+                    #
+                    # `push-admin.ts` devolve `false` quando elas faltam -- e ai
+                    # NENHUMA entrega e criada. Dois testes de `aviso-de-live`
+                    # esperavam 1 entrega e recebiam 0, o que parece regra de
+                    # negocio quebrada e era so configuracao ausente.
+                    #
+                    # ⚠️ Esse comportamento do codigo esta CERTO ("sem chaves o
+                    # push e ignorado -- dev, maquina nova"). O que faltava era a
+                    # esteira fornecer chaves de teste.
+                    #
+                    # A propria biblioteca `web-push` as gera, e elas duram o
+                    # tempo da execucao.
+                    # ⚠️ `grep -oE` + `cut`, e nao `sed` com grupo de captura:
+                    # grupo de captura precisa de contrabarra, e contrabarra
+                    # aqui dentro e erro de interpretacao do Groovy.
+                    VAPID=$(npx --yes web-push generate-vapid-keys --json)
+                    export VAPID_PUBLIC_KEY=$(echo "$VAPID" | grep -oE '"publicKey":"[^"]+"' | cut -d'"' -f4)
+                    export VAPID_PRIVATE_KEY=$(echo "$VAPID" | grep -oE '"privateKey":"[^"]+"' | cut -d'"' -f4)
+                    export VAPID_SUBJECT="mailto:teste@exemplo.invalido"
+
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
                     docker rm -f $PGC >/dev/null 2>&1 || true
