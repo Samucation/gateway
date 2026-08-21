@@ -1,0 +1,41 @@
+# Permite ao Jenkins tocar SO nos namespaces de homologacao, nominalmente.
+#
+# ⚠️ `resourceNames` com os 8 nomes, e nao `namespaces: *`.
+#
+# O manifesto de cada projeto inclui o proprio objeto Namespace, entao o `apply`
+# precisa poder patcha-lo. Dar `patch` em TODOS os namespaces daria ao token o
+# poder de mexer em `kube-system` -- e esse token vive na VM, que e producao.
+#
+# ⚠️ `create` fica de FORA de proposito: os namespaces sao criados uma vez, a
+# mao. Se a esteira pudesse cria-los, um erro de digitacao no overlay geraria um
+# namespace novo em silencio, e o deploy "funcionaria" no lugar errado.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: jenkins-namespaces-hmg
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames:
+      - urupix
+      - sprinklegames
+      - opuschat
+      - plataforma
+      - central-ia
+      - veltrixa
+      - sigma-financeiro
+      - sigma-midia
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-namespaces-hmg
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: jenkins-namespaces-hmg
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: default
