@@ -1,0 +1,68 @@
+# O túnel de HOMOLOGAÇÃO desta estação.
+#
+# ===========================================================================
+# ⚠️ TÚNEL NOVO, E NÃO O DE PRODUÇÃO RECONFIGURADO
+# ===========================================================================
+# Um túnel Cloudflare é um ID, e o mesmo ID rodando em duas máquinas vira
+# RÉPLICA: a Cloudflare divide o tráfego entre as instâncias, por desenho.
+#
+# Isso não é teoria — aconteceu em 21/08/2026, durante o corte. O watchdog
+# ressuscitou o túnel de produção nesta estação enquanto ele já rodava na VM, e
+# metade das requisições passou a cair de cada lado. O sintoma foi
+# `urupix.com.br` alternando 200 e 502, e o Jenkins caindo em 404 — porque
+# metade chegava numa máquina cuja configuração não tinha aquelas rotas.
+#
+# Se homologação usasse o túnel de produção, metade do tráfego REAL cairia no
+# ambiente de teste, contra um banco de teste. É o pior caso possível.
+#
+# ===========================================================================
+# ⚠️ TODO NOME LEVA `-hmg`
+# ===========================================================================
+# Não é enfeite. É a proteção mais barata que existe contra o erro mais caro:
+# abrir a aba errada e mexer em produção achando que é teste. Um endereço que se
+# parece com o de produção convida a esse engano; um que grita `-hmg` na barra
+# do navegador, não.
+tunnel: d2b14ffb-a9f7-490c-8703-1261ff3707e8
+credentials-file: C:\Users\samue\.cloudflared\d2b14ffb-a9f7-490c-8703-1261ff3707e8.json
+
+originRequest:
+  connectTimeout: 30s
+  noHappyEyeballs: true
+
+ingress:
+  # ⚠️ Tudo entra pela porta 8090, que é o Traefik do cluster k3d desta estação
+  # (mapeada em `estacao/k3d-hmg.yaml`). Quem escolhe o serviço é ele, pelo
+  # Host — por isso nenhuma regra usa `httpHostHeader`: sobrescrever faria o
+  # Traefik procurar uma regra que não existe e devolver 404 com a aplicação de
+  # pé.
+  - hostname: urupix-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: sprinklegames-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: opuschat-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: cafe-api-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: central-ia-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: sigma-financeiro-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: veltrixa-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: veltrixa-admin-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: veltrixa-auth-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+  - hostname: sigma-midia-hmg.cursodetecnologia.dev.br
+    service: http://127.0.0.1:8090
+
+  # ---- o que continua fora do cluster ------------------------------------
+  #
+  # O NerdQuiz nunca foi migrado para Kubernetes e segue rodando direto na
+  # estação. Fica aqui para não perder o acesso.
+  - hostname: quiz.cursodetecnologia.dev.br
+    service: http://127.0.0.1:3000
+  - hostname: api.cursodetecnologia.dev.br
+    service: http://127.0.0.1:3333
+
+  - service: http_status:404
