@@ -68,11 +68,25 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Imagens locais que nao estao em uso.
 #
-# 24h em vez de uma semana: a imagem util ja esta no registro, e reconstruir do
-# cache local so vale para quem for repetir o build no mesmo dia.
+# 🐞 SEM FILTRO DE IDADE. Ele estava em `--filter until=24h`, e isso deixou
+# escapar 14,8 GB.
+#
+# O raciocinio original parecia bom: "guardar as de hoje, que ainda servem de
+# cache". Mas num dia de trabalho TODAS as imagens tem menos de 24 horas -- o
+# filtro protegia justamente aquelas que enchiam o disco, e a limpeza diaria
+# reportava sucesso sem liberar quase nada.
+#
+# Isso terminou num incidente real em 21/08/2026: o disco chegou a 97%, o
+# kubelet marcou o no com `disk-pressure` e DESPEJOU sete Pods -- Grafana,
+# Loki, Prometheus, dois Keycloak, o rembg e o proprio SonarQube. Rodar
+# `docker image prune -af` sem filtro liberou 14,8 GB de uma vez.
+#
+# A imagem util ja esta no REGISTRO do cluster; a copia local do Docker e
+# descartavel depois do push. Quem quiser cache de camada tem o `builder
+# prune --keep-storage`, que poe teto de TAMANHO -- que e o que importa aqui.
 # ---------------------------------------------------------------------------
 log "imagens locais:"
-faz "docker image prune -af --filter until=24h 2>/dev/null | tail -1 | sed 's/^/  /'"
+faz "docker image prune -af 2>/dev/null | tail -1 | sed 's/^/  /'"
 
 # ---------------------------------------------------------------------------
 # 3. O REGISTRO do cluster.
