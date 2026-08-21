@@ -126,6 +126,28 @@ PROJETOS = [
          checa=[('sigma-payments.hmg', '/', '200')]),
 ]
 
+# ⚠️ `--provenance=false --sbom=false` -- SEM ISTO A IMAGEM NAO BAIXA.
+    #
+    # 🐞 Descoberto em 21/08/2026, ao montar o cluster de homologacao: NENHUMA
+    # imagem publicada pela esteira podia ser baixada do registro. Nem pela
+    # propria VM que a construiu:
+    #
+    #   could not fetch content descriptor sha256:33388d...
+    #   (application/vnd.in-toto+json) from remote: not found
+    #
+    # O BuildKit anexa ATESTADOS (proveniencia e SBOM) por padrao. O indice OCI
+    # publicado passa a referenciar esses blobs, e o `docker push` para este
+    # registro nao os envia -- entao o manifesto aponta para conteudo que nao
+    # existe do outro lado.
+    #
+    # ⚠️ E o defeito era INVISIVEL: producao funcionava porque o containerd da
+    # VM ja tinha a imagem em cache LOCAL, do momento do build. O registro
+    # servia de enfeite. Numa limpeza de cache, ou num no novo, os Pods cairiam
+    # em ImagePullBackOff e nada teria mudado no codigo.
+    #
+    # Os `ImagePullBackOff` do opuschat e do plataforma, atribuidos a "tag
+    # errada", eram isto.
+
 REG = 'localhost:32000'
 
 CABECALHO = """// ===========================================================================
@@ -446,7 +468,7 @@ for p in PROJETOS:
         partes.append("""
         stage('Construir') {
             steps {
-                sh 'docker build %s'
+                sh 'docker build --provenance=false --sbom=false %s'
             }
         }
 """ % args.format(REG='$REGISTRO'))
@@ -454,7 +476,7 @@ for p in PROJETOS:
         blocos = []
         for nome, args in p['imagens']:
             blocos.append("""                stage('%s') {
-                    steps { sh 'docker build %s' }
+                    steps { sh 'docker build --provenance=false --sbom=false %s' }
                 }""" % (nome.replace(p['dir'] + '-', ''), args.format(REG='$REGISTRO')))
         partes.append("""
         // Em paralelo: em serie o tempo e a SOMA, em paralelo e o MAIOR.

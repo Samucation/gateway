@@ -1,0 +1,86 @@
+# O cluster de HOMOLOGAÇÃO desta estação.
+#
+# ===========================================================================
+# POR QUE k3d, E NÃO MicroK8s NEM O KUBERNETES DO DOCKER DESKTOP
+# ===========================================================================
+# Os manifestos declaram `ingressClassName: traefik`, porque a VM roda MicroK8s
+# com o addon `ingress`, que É o Traefik.
+#
+# • MicroK8s aqui exigiria mais uma VM Linux (esta estação é Windows) — uma
+#   camada inteira a mais para manter, com disco e memória próprios.
+# • O Kubernetes do Docker Desktop sobe SEM controlador de ingress. Instalar o
+#   Traefik à mão funcionaria, mas seria uma segunda instalação para divergir
+#   da de lá na primeira atualização.
+# • k3d roda k3s em contêiner, e o k3s JÁ TRAZ Traefik. Os mesmos manifestos
+#   valem nos dois lados sem uma linha de adaptação — que é o ponto inteiro de
+#   ter homologação.
+#
+# ===========================================================================
+# ⚠️ O REGISTRO DE IMAGENS É O DA VM, E ISSO É DE PROPÓSITO
+# ===========================================================================
+# A esteira roda na VM, constrói a imagem e a publica no registro DE LÁ. Se esta
+# estação tivesse registro próprio, a mesma imagem precisaria ser construída (ou
+# copiada) duas vezes — e "funciona em homologação mas não em produção" passaria
+# a ter uma causa a mais para investigar.
+#
+# O espelho abaixo faz `localhost:32000` (o que está escrito nos manifestos)
+# apontar para o registro da VM. Assim o overlay de hmg e o de prd referenciam a
+# MESMA imagem, pelo mesmo nome, e o que foi testado aqui é exatamente o que
+# sobe lá.
+#
+# ⚠️ O IP DA VM ESTÁ FIXO AQUI, e isso é dívida conhecida. Ela está em DHCP e já
+# trocou de endereço três vezes em 21/08/2026. Quando trocar, este arquivo
+# precisa ser atualizado e o cluster recriado. O conserto de verdade é reserva
+# de DHCP no roteador — depende do dono.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: hmg
+
+servers: 1
+agents: 0
+
+image: docker.io/rancher/k3s:v1.35.5-k3s1
+
+ports:
+  # A porta 80 do Traefik do cluster sai em 8090 na estação. O túnel de
+  # homologação vai apontar para cá.
+  #
+  # ⚠️ Não é a 80: nesta máquina ela é disputada, e um conflito de porta em
+  # cluster aparece como "o cluster subiu mas nada responde".
+  - port: 8090:80
+    nodeFilters:
+      - loadbalancer
+
+registries:
+  # ⚠️ SÓ o `mirrors`, SEM bloco `configs`.
+  #
+  # 🐞 A primeira versão trazia `configs` com `tls.insecure_skip_verify: true`,
+  # achando que era isso que liberava um registro sem TLS. É o contrário: a
+  # simples presença de `tls` faz o containerd tentar HTTPS. O erro foi
+  #
+  #   failed to pull: content at https://192.168.15.55:32000/v2/... not found
+  #
+  # — com `https` no lugar do `http` que está escrito logo abaixo. Um registro
+  # que só fala HTTP responde lixo para um handshake TLS, e a mensagem fala de
+  # "conteúdo não encontrado", que manda procurar a imagem errada.
+  #
+  # Para HTTP puro basta o endpoint com `http://`, e nada mais.
+  config: |
+    mirrors:
+      "localhost:32000":
+        endpoint:
+          - "http://192.168.15.55:32000"
+
+options:
+  k3s:
+    extraArgs:
+      # ⚠️ O `servicelb` (Klipper) fica de fora: ele tenta abrir portas do HOST
+      # para cada Service do tipo LoadBalancer, e nesta máquina isso colide com
+      # o que já está no ar. O acesso entra pelo Ingress, que é como a VM faz.
+      - arg: --disable=servicelb
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: false
