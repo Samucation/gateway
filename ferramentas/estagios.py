@@ -117,31 +117,85 @@ PORTAO = """
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     sh '''
                         set -e
-                        # 1. ESPERAR a analise terminar de ser processada.
-                        #    Perguntar antes devolve o resultado ANTERIOR.
+
+                        # ================================================================
+                        # 🐞 ESTE PORTAO JA FOI FAIL-OPEN, E PASSOU EM 0 SEGUNDOS
+                        # ================================================================
+                        # A primeira versao consultava `api/ce/component` para
+                        # saber se a analise terminara. Esse endpoint devolve
+                        # "Insufficient privileges" para um token de ANALISE --
+                        # entao a variavel vinha vazia, o laco saia na primeira
+                        # volta, e um padrao `r=OK` fazia o portao APROVAR.
+                        #
+                        # Passou verde sem ter perguntado nada. Um portao que
+                        # aprova quando nao consegue consultar e pior que nao ter
+                        # portao: da confianca sem dar garantia.
+                        #
+                        # Agora: qualquer duvida REPROVA, e o caminho de espera
+                        # usa o report-task.txt que o proprio scanner escreve --
+                        # que o token de analise PODE ler.
+                        # ================================================================
+
+                        REL=.scannerwork/report-task.txt
+                        if [ ! -f "$REL" ]; then
+                            echo "ERRO: $REL nao existe -- a analise nao chegou a rodar."
+                            exit 1
+                        fi
+                        TAREFA=$(grep -E "^ceTaskId=" "$REL" | cut -d= -f2)
+                        [ -n "$TAREFA" ] || { echo "ERRO: sem ceTaskId em $REL"; exit 1; }
+                        echo "==> tarefa de analise: $TAREFA"
+
+                        # 1. ESPERAR a analise ser PROCESSADA.
+                        #    Perguntar o portao antes disso devolveria o resultado
+                        #    ANTERIOR -- verde de ontem num codigo que quebrou hoje.
+                        st=""
                         for i in $(seq 1 60); do
-                            # ⚠️ `grep -oE` direto no JSON, sem `tr` para quebrar
-                            # linha: `tr "," "n"` precisaria de contrabarra, e
-                            # contrabarra aqui dentro e erro de interpretacao do
-                            # Groovy -- o pipeline nem chegaria a rodar.
-                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1/api/ce/component?component=$SONAR_CHAVE" | grep -oE "SUCCESS|FAILED|CANCELED|PENDING|IN_PROGRESS" | head -1)
+                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1/api/ce/task?id=$TAREFA" | grep -oE "PENDING|IN_PROGRESS|SUCCESS|FAILED|CANCELED" | head -1)
                             case "$st" in
-                                SUCCESS|"") break ;;
-                                FAILED|CANCELED) echo "a analise FALHOU no Sonar"; exit 1 ;;
+                                SUCCESS)         break ;;
+                                FAILED|CANCELED) echo "a analise FALHOU no Sonar (estado $st)"; exit 1 ;;
                             esac
                             sleep 5
                         done
+                        if [ "$st" != "SUCCESS" ]; then
+                            echo "ERRO: a analise nao terminou em 5 minutos (ultimo estado: ${st:-desconhecido})"
+                            exit 1
+                        fi
 
                         # 2. So AGORA ler o portao.
                         corpo=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1/api/qualitygates/project_status?projectKey=$SONAR_CHAVE")
-                        r=OK
-                        echo "$corpo" | grep -q "ERROR" && r=ERROR
-                        echo "==> portao de qualidade: $r"
+                        r=$(echo "$corpo" | grep -oE "OK|ERROR|WARN|NONE" | head -1)
+                        echo "==> portao de qualidade: ${r:-SEM RESPOSTA}"
                         echo "    detalhes em $SONAR_URL/dashboard?id=$SONAR_CHAVE"
 
-                        # ⚠️ ERROR reprova o build. Portao que so avisa e portao
-                        # que ninguem fecha.
-                        [ "$r" != "ERROR" ] || { echo "REPROVADO pelo portao de qualidade"; exit 1; }
+                        # ⚠️ FAIL-CLOSED: so `OK` passa. Vazio, erro de rede,
+                        # privilegio insuficiente ou qualquer outra coisa REPROVA.
+                        if [ "$r" != "OK" ]; then
+                            echo "REPROVADO pelo portao de qualidade."
+                            echo "$corpo" | head -c 400
+                            exit 1
+                        fi
+
+                        # ⚠️ Portao sem CONDICAO nenhuma tambem e alarme falso.
+                        #
+                        # O portao padrao do Sonar avalia CODIGO NOVO. Na primeira
+                        # analise de um projeto que ja existia nao ha base de
+                        # comparacao, entao ele devolve `"conditions":[]` e aprova
+                        # tudo -- inclusive um codigo cheio de problemas antigos.
+                        #
+                        # Isso nao reprova o build (seria injusto no primeiro
+                        # build), mas fica dito ALTO no log, para ninguem
+                        # confundir "passou" com "foi avaliado".
+                        # `grep -qF`: busca LITERAL. Com regex seriam precisos
+                        # escapes para os colchetes, e contrabarra aqui dentro e
+                        # erro de interpretacao do Groovy.
+                        if echo "$corpo" | grep -qF 'conditions":[]'; then
+                            echo
+                            echo "    ⚠️  ATENCAO: o portao passou SEM NENHUMA CONDICAO avaliada."
+                            echo "        O portao padrao olha so CODIGO NOVO, e nesta analise"
+                            echo "        nao havia base de comparacao. Ele NAO garantiu nada"
+                            echo "        sobre o codigo existente."
+                        fi
                     '''
                 }
             }
