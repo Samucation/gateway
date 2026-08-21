@@ -129,7 +129,21 @@ TESTES_NODE = """
 
                     # ⚠️ Porta pela linha de comando do Postgres, porque com
                     # --network host o -p do Docker nao vale.
-                    docker run -d --name $PGC --network host -e POSTGRES_USER=teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=postgres postgres:16-alpine -c port=$PGP >/dev/null
+                    #
+                    # ⚠️ `max_connections` bem acima do padrao (100).
+                    #
+                    # 🐞 Build #26: o banco caiu 30 segundos depois de subir, no
+                    # quinto arquivo de 107, com "Connection terminated
+                    # unexpectedly" em todo teste que usa banco. O conjunto roda
+                    # com `fileParallelism: false`, mas cada arquivo abre seu
+                    # proprio conjunto de conexoes -- e conexao que nao e
+                    # devolvida vai somando. Passar do teto derruba as que ja
+                    # existiam, e o sintoma aparece longe da causa: falha em
+                    # testes que nao tem nada a ver com quem vazou a conexao.
+                    #
+                    # 400 nao pesa: e um banco descartavel, em memoria de
+                    # sobra, que vive alguns minutos.
+                    docker run -d --name $PGC --network host -e POSTGRES_USER=teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=postgres postgres:16-alpine -c port=$PGP -c max_connections=400 >/dev/null
 
                     # `pg_isready`, e nao porta TCP: a porta abre ANTES de o
                     # Postgres aceitar conexao, e quem conectasse no intervalo
@@ -225,9 +239,32 @@ TESTES_NODE = """
                     # que nao existe.
                     export FCM_SERVICE_ACCOUNT_B64=$(node -e 'const c=require("crypto");const k=c.generateKeyPairSync("rsa",{modulusLength:2048,privateKeyEncoding:{type:"pkcs8",format:"pem"},publicKeyEncoding:{type:"spki",format:"pem"}});process.stdout.write(Buffer.from(JSON.stringify({type:"service_account",project_id:"teste-invalido",private_key_id:"teste",private_key:k.privateKey,client_email:"teste@teste-invalido.iam.gserviceaccount.com",client_id:"0",token_uri:"https://oauth2.googleapis.com/token"})).toString("base64"))')
 
-                    DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
+                    # ⚠️ GUARDA A PROVA ANTES DE APAGAR O BANCO.
+                    #
+                    # 🐞 No build #26 o Postgres morreu no meio da execucao e
+                    # levou junto a unica explicacao possivel: o conteiner era
+                    # removido logo depois, com o log dentro. Sobrou o sintoma
+                    # ("Connection terminated unexpectedly") sem a causa, e nao
+                    # deu para decidir entre falta de memoria, teto de conexoes
+                    # e queda do processo.
+                    #
+                    # `set -e` esta ligado, entao o `if` e necessario: sem ele o
+                    # passo morreria aqui e o dump nunca rodaria.
+                    if DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage; then
+                        ok=1
+                    else
+                        ok=0
+                        echo "==================== o banco de teste disse ===================="
+                        docker logs $PGC 2>&1 | tail -40
+                        echo "==================== estado do conteiner ======================="
+                        docker inspect -f 'rodando={{.State.Running}} saiu={{.State.ExitCode}} morto-por-falta-de-memoria={{.State.OOMKilled}}' $PGC 2>&1
+                        echo "==================== memoria da maquina ========================"
+                        free -h
+                        echo "==============================================================="
+                    fi
 
                     docker rm -fv $PGC >/dev/null 2>&1 || true
+                    [ "$ok" = "1" ] || exit 1
                     echo "==> cobertura gerada em coverage/lcov.info"
                 '''
             }
