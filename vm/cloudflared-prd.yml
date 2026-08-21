@@ -1,38 +1,136 @@
-# O túnel da VM — agora servindo PRODUÇÃO.
+# O túnel de PRODUÇÃO, rodando na VM.
 #
-# ⚠️ Este é o túnel `f0d7cd68`, que já existia na VM só para o Jenkins. O túnel
-# da estação (`47a05dc3`) NÃO foi movido de propósito.
+# ===========================================================================
+# ⚠️ ESTE É O TÚNEL DA ESTAÇÃO (47a05dc3), QUE MUDOU DE MÁQUINA
+# ===========================================================================
+# Não é um túnel novo, e isso é o ponto: todos os CNAME já apontam para este ID,
+# inclusive os das zonas `urupix.com.br` e `sprinklegames.com.br`, que o
+# `cloudflared` daqui NÃO consegue editar (o `cert.pem` só alcança
+# `cursodetecnologia.dev.br` — tentar criar a rota gerou
+# `urupix.com.br.cursodetecnologia.dev.br`, um subdomínio concatenado e inútil).
 #
-# Um túnel Cloudflare é um ID, e o MESMO ID rodando em duas máquinas vira
-# réplica: a Cloudflare DIVIDE o tráfego entre as instâncias, por desenho, para
-# alta disponibilidade. Metade das requisições iria para cada máquina, nada
-# daria erro, e cada metade falaria com um banco diferente. Numa doação PIX,
-# metade dos pagamentos cairia de cada lado.
+# Movendo o túnel em vez do DNS, nenhum registro precisa mudar.
 #
-# Por isso a troca é de DNS, e não de túnel: os domínios passam a apontar para
-# este ID. O túnel da estação continua no ar, mas não recebe mais nada — e é
-# essa a volta, se precisar: repontar o DNS.
-tunnel: f0d7cd68-27da-4686-b826-4ce1d3a9243f
-credentials-file: /etc/cloudflared/f0d7cd68-27da-4686-b826-4ce1d3a9243f.json
+# ⚠️ O SERVIÇO DA ESTAÇÃO TEM QUE ESTAR PARADO. Um túnel Cloudflare é um ID, e o
+# mesmo ID em duas máquinas vira RÉPLICA: a Cloudflare divide o tráfego entre as
+# instâncias, por desenho. Nada daria erro — cada metade das requisições falaria
+# com um banco diferente. Numa doação PIX, metade dos pagamentos cairia de cada
+# lado.
+#
+# ===========================================================================
+# O QUE MORA AQUI E O QUE AINDA MORA NA ESTAÇÃO
+# ===========================================================================
+# Migrado (serve do cluster, e sobrevive à estação desligada):
+#   urupix, sigma-midia
+#
+# ⚠️ NÃO migrado (o túnel devolve para a estação pela rede local): quiz, api,
+# veltrixa/ninjasystem, opuschat, cafe-api, sigma-financeiro, central-ia,
+# sprinklegames.
+#
+# Esses continuam funcionando enquanto a estação estiver ligada, e SÓ esses caem
+# quando ela for desligada — o que é o comportamento desejado: cada um migra
+# quando seus dados forem copiados.
+#
+# ⚠️ `192.168.15.9` é o endereço da estação na rede local. Ele NÃO está em DHCP
+# reservado; se mudar, estas rotas quebram. É a mesma dívida da VM.
+tunnel: 47a05dc3-c2d1-4801-bf63-d4cf4bc7a76b
+credentials-file: /etc/cloudflared/47a05dc3-c2d1-4801-bf63-d4cf4bc7a76b.json
 
 originRequest:
   connectTimeout: 30s
   noHappyEyeballs: true
 
 ingress:
-  # O Jenkins segue com destino próprio (nginx na 8081), fora do Traefik.
+  # ---- JENKINS (nginx local da VM, fora do Traefik) ----------------------
   - hostname: jenkins.cursodetecnologia.dev.br
     service: http://127.0.0.1:8081
 
-  # ⚠️ Tudo o mais entra pelo Traefik do MicroK8s, na 80, e é ELE quem escolhe o
-  # serviço pelo `Host`. Por isso nenhuma destas linhas usa `httpHostHeader`:
-  # sobrescrever o Host aqui faria o Traefik procurar uma regra que não existe e
-  # devolver 404 — com a aplicação de pé, o que engana quem for depurar.
+  # ---- MIGRADO: servido pelo Traefik do cluster --------------------------
+  #
+  # ⚠️ Sem `httpHostHeader`: quem escolhe o serviço é o Traefik, pelo Host
+  # original. Sobrescrever faria ele procurar uma regra que não existe e
+  # devolver 404 com a aplicação de pé.
   - hostname: urupix.com.br
     service: http://127.0.0.1:80
   - hostname: www.urupix.com.br
     service: http://127.0.0.1:80
   - hostname: urupix.cursodetecnologia.dev.br
     service: http://127.0.0.1:80
+  - hostname: sigma-midia.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
+  - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
+    service: http://127.0.0.1:80
+
+  # ---- AINDA NA ESTAÇÃO: devolve pela rede local -------------------------
+  #
+  # ⚠️ Aqui o `httpHostHeader` É NECESSÁRIO, ao contrário do bloco acima: quem
+  # recebe do outro lado é o Kong da estação (8050), que também roteia por Host.
+  # A porta 8050 é o gateway único; 3000/3333 são o NerdQuiz, que não passa por
+  # ele.
+  - hostname: quiz.cursodetecnologia.dev.br
+    service: http://192.168.15.9:3000
+  - hostname: api.cursodetecnologia.dev.br
+    service: http://192.168.15.9:3333
+
+  - hostname: sprinklegames.com.br
+    service: http://192.168.15.9:4310
+    originRequest:
+      httpHostHeader: sprinklegames.com.br
+  - hostname: www.sprinklegames.com.br
+    service: http://192.168.15.9:4310
+    originRequest:
+      httpHostHeader: www.sprinklegames.com.br
+
+  - hostname: cafe-api.cursodetecnologia.dev.br
+    service: http://192.168.15.9:8050
+  - hostname: sigma-financeiro.cursodetecnologia.dev.br
+    service: http://192.168.15.9:8050
+    originRequest:
+      httpHostHeader: sigma-financeiro.cursodetecnologia.dev.br
+  - hostname: sigma-financeiro-sandbox.cursodetecnologia.dev.br
+    service: http://192.168.15.9:3201
+    originRequest:
+      httpHostHeader: sigma-financeiro-sandbox.cursodetecnologia.dev.br
+  - hostname: opuschat.cursodetecnologia.dev.br
+    service: http://192.168.15.9:8050
+    originRequest:
+      httpHostHeader: opuschat.cursodetecnologia.dev.br
+  - hostname: central-ia.cursodetecnologia.dev.br
+    service: http://192.168.15.9:8030
+    originRequest:
+      httpHostHeader: central-ia.cursodetecnologia.dev.br
+  - hostname: central-ia-sandbox.cursodetecnologia.dev.br
+    service: http://192.168.15.9:8030
+    originRequest:
+      httpHostHeader: central-ia-sandbox.cursodetecnologia.dev.br
+
+  - hostname: ninjasystem.cursodetecnologia.dev.br
+    service: http://192.168.15.9:4201
+    originRequest:
+      httpHostHeader: ninjasystem.cursodetecnologia.dev.br
+  - hostname: veltrixa.cursodetecnologia.dev.br
+    service: http://192.168.15.9:4201
+    originRequest:
+      httpHostHeader: veltrixa.cursodetecnologia.dev.br
+  - hostname: ninjasystem-admin.cursodetecnologia.dev.br
+    service: http://192.168.15.9:4200
+    originRequest:
+      httpHostHeader: ninjasystem-admin.cursodetecnologia.dev.br
+  # ⚠️ As três regras do auth vêm NA ORDEM, e a ordem é o que as faz valer: as
+  # duas primeiras liberam só o realm do Veltrixa e os estáticos; a terceira
+  # fecha o resto com 404. Invertidas, a de 404 casaria primeiro e o Keycloak
+  # ficaria inacessível.
+  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
+    path: ^/realms/veltrixa(/.*)?$
+    service: http://192.168.15.9:8085
+    originRequest:
+      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
+  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
+    path: ^/resources/.*
+    service: http://192.168.15.9:8085
+    originRequest:
+      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
+  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
+    service: http_status:404
 
   - service: http_status:404
