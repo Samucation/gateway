@@ -307,6 +307,18 @@ RODAPE = """
             // camada, e o crescimento fica limitado.
             sh 'docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true'
             sh 'docker builder prune -f --keep-storage=2GB >/dev/null 2>&1 || true'
+
+            // ⚠️ Os Postgres de teste, aconteca o que acontecer.
+            //
+            // 🐞 O estagio de testes ja remove o dele no fim -- mas se ele
+            // MORRER antes (teste vermelho, aborto, reinicio do Jenkins), o
+            // conteiner fica de pe segurando a porta 15432, e o build SEGUINTE
+            // nao consegue subir o seu: "could not bind IPv4 address: Address
+            // in use".
+            //
+            // Foi o que derrubou o build #8 do live-flow: o `pg-teste-7`
+            // continuava no ar. Aqui e o unico lugar que roda sempre.
+            sh 'for c in $(docker ps -aq --filter name=pg-teste 2>/dev/null); do docker rm -f "$c" >/dev/null 2>&1 || true; done'
         }}
     }}
 }}

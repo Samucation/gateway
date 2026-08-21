@@ -74,7 +74,24 @@ TESTES_NODE = """
                     # numero do build para duas execucoes nunca colidirem.
                     PGC=pg-teste-$BUILD_NUMBER
                     PGP=15432
-                    docker rm -f $PGC >/dev/null 2>&1 || true
+
+                    # 🐞 Remove TODOS os `pg-teste-*`, nao so o deste build.
+                    #
+                    # A primeira versao fazia `docker rm -f $PGC` -- o do build
+                    # ATUAL, que nunca existe na primeira tentativa. Um build
+                    # anterior que tenha morrido antes da limpeza (por falha, por
+                    # aborto, por reinicio do Jenkins) deixa o conteiner de pe
+                    # SEGURANDO A PORTA.
+                    #
+                    # Foi o que derrubou o build #8: o `pg-teste-7` continuava no
+                    # ar, e o Postgres novo morreu com
+                    # "could not bind IPv4 address: Address in use". A mensagem
+                    # aparecia no `docker logs`, nao no erro do passo -- entao
+                    # sem o dump de log que este estagio faz, o sintoma seria
+                    # apenas "nao subiu em 60 segundos".
+                    for velho in $(docker ps -aq --filter name=pg-teste 2>/dev/null); do
+                        docker rm -f "$velho" >/dev/null 2>&1 || true
+                    done
 
                     # ⚠️ Porta pela linha de comando do Postgres, porque com
                     # --network host o -p do Docker nao vale.
@@ -96,8 +113,13 @@ TESTES_NODE = """
                     fi
 
                     # ⚠️ Nada de `|| true` aqui: teste que falha TEM que reprovar
-                    # o build. O conteiner e removido no `post`, que roda mesmo
-                    # quando este passo morre.
+                    # o build.
+                    #
+                    # O conteiner e removido tambem no `post { always }`, que
+                    # roda mesmo quando este passo morre -- e ESSA e a rede de
+                    # seguranca que faltava: sem ela, um build interrompido aqui
+                    # deixava o Postgres de pe e o build SEGUINTE nao conseguia
+                    # subir o dele.
                     npm ci --no-audit --no-fund --ignore-scripts
                     DATABASE_URL="postgresql://teste:teste@127.0.0.1:$PGP/postgres" npx vitest run --coverage
 
