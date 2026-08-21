@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins
+  namespace: default
+---
+# ⚠️ Token que NAO EXPIRA, criado a mao.
+#
+# Do Kubernetes 1.24 em diante a ServiceAccount nao ganha mais Secret de token
+# sozinha, e `kubectl create token` devolve um de validade curta -- que
+# funcionaria hoje e quebraria o deploy semanas depois, com "Unauthorized" e
+# nenhuma mudanca aparente.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-token
+  namespace: default
+  annotations:
+    kubernetes.io/service-account.name: jenkins
+type: kubernetes.io/service-account-token

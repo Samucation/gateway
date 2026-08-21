@@ -106,12 +106,19 @@ options:
       - arg: --tls-san=host.docker.internal
         nodeFilters:
           - server:*
-      # ⚠️ O `servicelb` (Klipper) fica de fora: ele tenta abrir portas do HOST
-      # para cada Service do tipo LoadBalancer, e nesta máquina isso colide com
-      # o que já está no ar. O acesso entra pelo Ingress, que é como a VM faz.
-      - arg: --disable=servicelb
-        nodeFilters:
-          - server:*
+      # 🐞 `--disable=servicelb` ESTAVA AQUI, e quebrava tudo.
+      #
+      # Eu tirei o Klipper achando que ele abriria portas do HOST e colidiria
+      # com o que já roda nesta máquina. Ele NÃO faz isso: ele abre a porta
+      # dentro do contêiner do NÓ.
+      #
+      # E é justamente ele que faz o Service `LoadBalancer` do Traefik escutar
+      # na porta 80 do nó — que é para onde o `serverlb` do k3d encaminha o
+      # 8090. Sem ele, a porta 8090 aceitava conexão (o serverlb estava de pé) e
+      # do outro lado não havia ninguém: `curl` devolvia 000, e o Traefik
+      # aparecia `1/1 Running` com o Ingress declarado corretamente.
+      #
+      # ⚠️ Sintoma que engana: tudo verde no `kubectl`, e nada responde.
   kubeconfig:
     updateDefaultKubeconfig: true
     switchCurrentContext: false

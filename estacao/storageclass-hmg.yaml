@@ -1,0 +1,26 @@
+# Faz o nome de classe de armazenamento da VM existir TAMBEM aqui.
+#
+# ⚠️ Os manifestos pedem `microk8s-hostpath`, que é o nome do provisionador do
+# MicroK8s. No k3d a classe padrão chama-se `local-path` — mesmo provisionador
+# de caminho local, nome diferente.
+#
+# Sem isto o PVC fica `Pending` para sempre e o Pod nunca agenda:
+#
+#   pod has unbound immediate PersistentVolumeClaims
+#
+# E o erro NÃO menciona classe de armazenamento — fala de agendamento, que manda
+# procurar em CPU e memória.
+#
+# ⚠️ POR QUE UM APELIDO, E NÃO TIRAR O NOME DO MANIFESTO
+#
+# `volumeClaimTemplates` de um StatefulSet é IMUTÁVEL. Remover o nome dali faria
+# o `apply` passar a falhar em PRODUÇÃO, onde os PVC já existem e estão ligados.
+# Trocar o ambiente que ainda não tem dado é mais barato que mexer no que já
+# está servindo.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: microk8s-hostpath
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
