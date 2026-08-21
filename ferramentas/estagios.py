@@ -446,7 +446,37 @@ SONAR_MAVEN = """
                         #
                         # O proprio scanner imprime a URL da tarefa; ler dali nao
                         # depende de permissao nenhuma.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-21 mvn -B -DskipTests compile org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        #
+                        # ⚠️ JDK 25 NA IMAGEM, e nao 21.
+                        #
+                        # 🐞 O sigma-payments estava VERMELHO desde o build #4 e
+                        # ninguem tinha visto -- a falha era no compilador:
+                        #
+                        #   maven-compiler-plugin:compile FAILED on sigma-payments-core
+                        #
+                        # Os dois projetos Java declaram `<java.version>25</...>`,
+                        # e a imagem trazia JDK 21. Um JDK nao compila para uma
+                        # versao mais nova que a dele.
+                        #
+                        # ⚠️ `test`, e NAO `-DskipTests compile`.
+                        #
+                        # 🐞 Com `-DskipTests` os testes Java NUNCA rodavam na
+                        # esteira. Sao 21 no sigma-payments e 97 no system-api --
+                        # todos verdes na maquina, nenhum executado aqui. E sem
+                        # execucao nao existe cobertura: o JaCoCo mede
+                        # instrumentando a JVM DOS TESTES, entao o portao recebia
+                        # 0%% e reprovava projetos que estao bem testados.
+                        #
+                        # ⚠️ Roda so o surefire (`*Test.java`). Os `*IT.java`
+                        # sobem conteiner via Testcontainers e ficam de fora de
+                        # proposito -- conferido: no sigma-payments sao 14 e no
+                        # system-api 9, todos com sufixo IT. Incluir aqui exigiria
+                        # entregar o socket do Docker ao conteiner do Maven, e
+                        # isso e decisao separada.
+                        #
+                        # `jacoco:report` explicito porque o POM prende o relatorio
+                        # ao `verify`, que nao acontece num `mvn test`.
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
