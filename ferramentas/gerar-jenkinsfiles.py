@@ -100,7 +100,7 @@ PROJETOS = [
          deploys=['plataforma-app', 'plataforma-redis'],
          checa=[('cafe-api.hmg', '/', '200')]),
 
-    dict(dir='sigma-financeiro', sonar='node', ns='sigma-financeiro',
+    dict(dir='sigma-financeiro', sonar='node', testes='node-sem-cobertura', ns='sigma-financeiro',
          imagens=[('sigma-financeiro', '-t {REG}/sigma-financeiro:$TAG .')],
          deploys=['sigma-financeiro'],
          checa=[('sigma-financeiro.hmg', '/', '200')]),
@@ -677,6 +677,9 @@ for p in PROJETOS:
     testes = {
         'node': estagios.TESTES_NODE,
         'node-simples': estagios.TESTES_NODE_SIMPLES,
+        # ⚠️ Sem cobertura: o projeto tem teste, mas nao tem o relator instalado.
+        # Ver o comentario de `TESTES_NODE_SEM_COBERTURA` em estagios.py.
+        'node-sem-cobertura': estagios.TESTES_NODE_SEM_COBERTURA,
     }.get(p.get('testes'), '')
 
     partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
