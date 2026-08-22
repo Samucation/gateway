@@ -50,6 +50,15 @@ $ErrorActionPreference = 'Continue'
 
 function NovaChave { -join ((1..64) | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] }) }
 
+# ⚠️ Semente de TOTP tem alfabeto PRÓPRIO — base32, e não hexadecimal.
+#
+# `PLATFORM_ADMIN_TOTP` é lido por biblioteca de TOTP, que decodifica base32
+# (RFC 4648: A-Z e 2-7). Uma chave hexadecimal passa pela decodificação sem
+# reclamar, porque `0-9` e `a-f` são caracteres aceitos — e produz bytes
+# ERRADOS. O aplicativo autenticador gera códigos que nunca conferem, e o erro
+# aparece como "código inválido", que parece problema de relógio.
+function NovaChaveBase32 { -join ((1..32) | ForEach-Object { 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[(Get-Random -Maximum 32)] }) }
+
 function Existe($ns, $nome) {
     & kubectl --context $Contexto get secret $nome -n $ns *> $null
     return ($LASTEXITCODE -eq 0)
@@ -106,6 +115,15 @@ $($linhas -join "`n")
 # ---------------------------------------------------------------------------
 $pgUrupix = NovaChave
 $pgSprink = NovaChave
+$pgOpus     = NovaChave
+$pgPlat     = NovaChave
+$pgVeltrixa = NovaChave
+$pgVeltKc   = NovaChave
+$pgVeltNfe  = NovaChave
+$pgSigma    = NovaChave
+$pgMidia    = NovaChave
+$s3Midia    = NovaChave
+$rootMidia  = NovaChave
 
 Aplicar 'urupix' 'urupix-secrets' ([ordered]@{
     POSTGRES_PASSWORD    = $pgUrupix
@@ -177,6 +195,132 @@ Aplicar 'sprinklegames' 'sprinklegames-secrets' ([ordered]@{
     # senha do admin de producao aqui daria acesso ao painel real a quem
     # descobrisse a de teste.
     SEED_ADMIN_PASSWORD = (NovaChave)
+})
+
+# ---------------------------------------------------------------------------
+# OpusChat e Plataforma
+# ---------------------------------------------------------------------------
+# ⚠️ Sao DOIS namespaces com a MESMA lista de chaves e o MESMO nome de banco
+# (`plataforma`). Nao sao o mesmo servico: o `opuschat` e o produto de chat e o
+# `plataforma` e o ERP, e cada um tem o seu Postgres. Copiar a URL de um para o
+# outro faz o app subir e falar com o banco ERRADO -- e como o esquema e o
+# mesmo, ele nao reclama.
+foreach ($p in @(
+    @{ Ns = 'opuschat';   Senha = $pgOpus; Host_ = 'opuschat-postgres' },
+    @{ Ns = 'plataforma'; Senha = $pgPlat; Host_ = 'plataforma-postgres' }
+)) {
+    Aplicar $p.Ns "$($p.Ns)-secrets" ([ordered]@{
+        POSTGRES_PASSWORD = $p.Senha
+        DATABASE_URL      = "postgres://plataforma:$($p.Senha)@$($p.Host_):5432/plataforma?sslmode=disable"
+        JWT_SECRET        = (NovaChave)
+
+        # Cofre de credenciais do proprio produto. Chave NOVA em homologacao: o
+        # que estiver cifrado com a de producao fica ilegivel aqui, que e
+        # exatamente o que se quer.
+        COFRE_CHAVE       = (NovaChave)
+
+        ATENDIMENTO_WEBHOOK_SECRET = (NovaChave)
+        PLATFORM_ADMIN_TOTP        = (NovaChaveBase32)
+
+        # ---- envio para fora e vizinhos: VAZIO -----------------------------
+        RESEND_API_KEY = ''
+        CENTRAL_CHAVE  = ''
+    })
+}
+
+# ---------------------------------------------------------------------------
+# Veltrixa (app + Keycloak + NF-e)
+# ---------------------------------------------------------------------------
+Aplicar 'veltrixa' 'veltrixa-secrets' ([ordered]@{
+    POSTGRES_PASSWORD       = $pgVeltrixa
+    JDBC_DATABASE_USERNAME  = 'veltrixa'
+    JDBC_DATABASE_PASSWORD  = $pgVeltrixa
+
+    KEYCLOAK_DB_PASSWORD    = $pgVeltKc
+    KEYCLOAK_ADMIN_USER     = 'admin'
+    KEYCLOAK_ADMIN_PASSWORD = (NovaChave)
+
+    # Conta que a API usa para falar com o Keycloak. Em producao o usuario e
+    # literalmente `trocar` -- divida anotada la, nao replicada aqui.
+    KEYCLOAK_AUTH_USER      = 'veltrixa-api-hmg'
+    KEYCLOAK_AUTH_PASS      = (NovaChave)
+
+    KEYCLOAK_CLIENT_SECRET       = (NovaChave)
+    KEYCLOAK_SEED_ADMIN_PASSWORD = (NovaChave)
+
+    NFE_POSTGRES_PASSWORD   = $pgVeltNfe
+
+    # ⚠️ Chave-mestra dos CERTIFICADOS DIGITAIS da NF-e.
+    #
+    # Em producao ela decifra certificado A1 de cliente real. Aqui e gerada, e
+    # isso e proposital: se um dump de producao vier parar neste ambiente, os
+    # certificados ficam ilegiveis em vez de utilizaveis.
+    #
+    # ⚠️ O sintoma de chave trocada engana -- o servico sobe, responde, e trata
+    # o certificado como "nao configurado". Sem erro nenhum. Se voce ver isso em
+    # PRODUCAO, a causa quase certa e chave trocada, nao certificado faltando.
+    NFE_VAULT_KEK           = (NovaChave)
+
+    # ---- pagamento: VAZIO de proposito ------------------------------------
+    SIGMA_CLIENT_ID      = ''
+    SIGMA_CLIENT_SECRET  = ''
+    SIGMA_WEBHOOK_SECRET = ''
+    SIGMA_RECEIVER_ID    = ''
+
+    MIDIA_API_KEY        = ''
+})
+
+# ---------------------------------------------------------------------------
+# Sigma Financeiro
+# ---------------------------------------------------------------------------
+# ⚠️ ESTE E O SERVICO QUE MOVE DINHEIRO. Nenhuma credencial de adquirente entra
+# aqui, em hipotese nenhuma.
+#
+# A garantia nao depende so de deixar campos vazios: a `TOKEN_ENCRYPTION_KEY` e
+# GERADA. As credenciais dos adquirentes ficam cifradas dentro do banco (em
+# `Receiver.credentialsEnc`), entao mesmo que um dump de producao seja
+# restaurado aqui por engano, elas nao decifram.
+Aplicar 'sigma-financeiro' 'sigma-financeiro-secrets' ([ordered]@{
+    POSTGRES_PASSWORD     = $pgSigma
+    DATABASE_URL          = "postgresql://sigma:$pgSigma@sigma-db:5432/sigma_financeiro?schema=public"
+    DATABASE_URL_PRODUCAO = "postgresql://sigma:$pgSigma@sigma-db:5432/sigma_financeiro?schema=public"
+    DATABASE_URL_SANDBOX  = "postgresql://sigma:$pgSigma@sigma-db-sandbox:5432/sigma_financeiro_sandbox?schema=public"
+
+    AUTH_SECRET           = (NovaChave)
+    TOKEN_ENCRYPTION_KEY  = (NovaChave)
+    SIGMA_WEBHOOK_TOKEN   = (NovaChave)
+
+    # ---- login social: vazio (entra pelo caminho de e-mail em hmg) --------
+    GOOGLE_CLIENT_ID      = ''
+    GOOGLE_CLIENT_SECRET  = ''
+})
+
+# ---------------------------------------------------------------------------
+# Sigma Midia (banco + MinIO + imgproxy)
+# ---------------------------------------------------------------------------
+Aplicar 'sigma-midia' 'sigma-midia-secrets' ([ordered]@{
+    MIDIA_DB_SENHA      = $pgMidia
+
+    MINIO_ROOT_USER     = 'midia-root'
+    MINIO_ROOT_PASSWORD = $rootMidia
+    MIDIA_S3_APP_USER   = 'sigma-midia-app'
+    MIDIA_S3_APP_SENHA  = $s3Midia
+
+    # ⚠️ Credencial repetida em formato de URL, para o cliente `mc`.
+    #
+    # Ela tem que casar com MIDIA_S3_APP_USER/SENHA acima. Sao o MESMO segredo
+    # escrito duas vezes; trocar um e esquecer o outro faz o `mc` falhar na
+    # criacao do balde, e o portal sobe sem lugar para gravar imagem.
+    MC_HOST_MINIO       = "http://sigma-midia-app:$s3Midia@sigma-midia-minio:9000"
+
+    # ⚠️ Chave e sal do imgproxy sao lidos como HEXADECIMAL. `NovaChave` ja
+    # devolve 64 caracteres hex; qualquer coisa fora desse alfabeto faz o
+    # imgproxy recusar a assinatura das URLs e devolver 403 em toda imagem.
+    MIDIA_IMG_CHAVE     = (NovaChave)
+    MIDIA_IMG_SAL       = (NovaChave)
+
+    MIDIA_ADMIN_EMAIL   = 'admin-hmg@exemplo.invalido'
+    MIDIA_ADMIN_SENHA   = (NovaChave)
 })
 
 Write-Host ''
