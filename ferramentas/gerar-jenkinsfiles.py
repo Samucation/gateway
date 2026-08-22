@@ -206,6 +206,9 @@ pipeline {{
         // mensagem clara -- em vez de passar calado dando a impressao de que
         // promoveu alguma coisa. Quando a inversao acontecer, isto vira o
         // contexto do cluster de producao e o resto do pipeline ja esta pronto.
+        // ⚠️ PRD_CONTEXTO nao e mais usado: producao E este cluster desde o
+        // corte. Fica aqui, vazio, so para nao quebrar quem tenha copiado o
+        // Jenkinsfile antes -- e some na proxima limpeza.
         PRD_CONTEXTO = ''
     }}
 

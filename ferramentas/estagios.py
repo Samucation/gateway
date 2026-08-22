@@ -650,29 +650,27 @@ PROMOCAO = """
             steps {
                 sh '''
                     set -e
-                    if [ -z "$PRD_CONTEXTO" ]; then
-                        echo "======================================================"
-                        echo " PRODUCAO AINDA NAO EXISTE -- nada foi promovido."
-                        echo "======================================================"
-                        echo
-                        echo " Este cluster E o de homologacao: todo hostname termina"
-                        echo " em .hmg, e as aplicacoes recusam subir se o ambiente"
-                        echo " declarado nao bater com a URL que elas usam. A producao"
-                        echo " de verdade ainda roda no Docker da estacao."
-                        echo
-                        echo " O bloqueio real e a MIGRACAO DE DADOS: os bancos deste"
-                        echo " cluster estao vazios. Promover para ca mandaria o"
-                        echo " urupix.com.br para um banco sem doacao nenhuma."
-                        echo
-                        echo " Quando a inversao acontecer, definir PRD_CONTEXTO no"
-                        echo " ambiente do pipeline e este estagio passa a funcionar."
-                        exit 1
-                    fi
-
+                    # ⚠️ PRODUCAO E ESTE CLUSTER, desde o corte de 21/08/2026.
+                    #
+                    # 🐞 Aqui havia uma guarda que exigia `PRD_CONTEXTO` e
+                    # imprimia "a producao de verdade ainda roda no Docker da
+                    # estacao". Era verdade quando foi escrita, e deixou de ser
+                    # no corte -- mas ficou no lugar, e derrubava a promocao
+                    # DEPOIS de o dono clicar no botao.
+                    #
+                    # ⚠️ Guarda que descreve o mundo tem prazo de validade. Esta
+                    # sobreviveu ao mundo que ela descrevia por um dia inteiro, e
+                    # so apareceu quando alguem finalmente conseguiu clicar em
+                    # promover -- porque o botao tambem estava quebrado, por
+                    # outro motivo.
+                    #
+                    # `$KUBECTL` sem `--context` e o cluster LOCAL desta VM, que
+                    # e producao. Homologacao usa `$KUBECTL_HMG`, que aponta para
+                    # a estacao.
                     K=k8s/overlays/prd/kustomization.yaml
                     A='"'
                     sed -i "s|newTag: .*|newTag: ${A}${TAG}${A}|" "$K"
-                    $KUBECTL --context "$PRD_CONTEXTO" apply -k k8s/overlays/prd
+                    $KUBECTL apply -k k8s/overlays/prd
                 '''
             }
         }
