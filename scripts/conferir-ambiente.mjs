@@ -36,6 +36,11 @@ const WORKSPACE = path.resolve("..");
 // assim que se prova que o guarda REPROVA de verdade, sem mexer no gateway
 const CONTAINER = process.env.GATEWAY_CONTAINER ?? "gateway-kong";
 
+// Onde procurar quando o Kong NÃO for um container Docker. Na VM ele é Pod.
+const KUBECTL = process.env.GATEWAY_KUBECTL ?? "microk8s kubectl";
+const NAMESPACE = process.env.GATEWAY_NAMESPACE ?? "gateway";
+const ALVO = process.env.GATEWAY_ALVO ?? "deploy/kong";
+
 const PROJETOS = [
   { id: "liveflow", compose: "live-flow/deploy/kong/docker-compose.yml" },
   { id: "sigmafin", compose: "sigma-financeiro/deploy/kong/docker-compose.yml" },
@@ -104,6 +109,15 @@ function envDoCompose(texto) {
   return env;
 }
 
+function soKong(linhas) {
+  const env = {};
+  for (const linha of linhas) {
+    const i = linha.indexOf("=");
+    if (i > 0 && linha.startsWith("KONG_")) env[linha.slice(0, i)] = linha.slice(i + 1);
+  }
+  return env;
+}
+
 async function envDoContainer(nome) {
   const { stdout } = await exec("docker", [
     "inspect",
@@ -111,21 +125,68 @@ async function envDoContainer(nome) {
     "--format",
     "{{range .Config.Env}}{{println .}}{{end}}",
   ]);
-  const env = {};
-  for (const linha of stdout.split("\n")) {
-    const i = linha.indexOf("=");
-    if (i > 0 && linha.startsWith("KONG_")) env[linha.slice(0, i)] = linha.slice(i + 1);
-  }
-  return env;
+  return soKong(stdout.split("\n"));
+}
+
+/**
+ * O mesmo ambiente, quando o Kong roda como Pod do Kubernetes.
+ *
+ * ⚠️ `exec ... -- env` lê o ambiente do PROCESSO, e não o que o manifesto
+ * declara. É a mesma exigência do caminho do Docker, e é o ponto do guarda
+ * inteiro: o que protege é o processo no ar, não o arquivo que descreve a
+ * intenção. Já houve caso de os dois divergirem — o `liveflow-kong` declarava
+ * três variáveis no compose e rodava sem nenhuma.
+ */
+async function envDoPod() {
+  const partes = KUBECTL.split(/\s+/);
+  const { stdout } = await exec(partes[0], [
+    ...partes.slice(1),
+    "exec",
+    "-n",
+    NAMESPACE,
+    ALVO,
+    "--",
+    "env",
+  ]);
+  return soKong(stdout.split("\n"));
 }
 
 async function main() {
+  // 🐞 O GATEWAY DEIXOU DE SER UM CONTAINER DOCKER.
+  //
+  // Até 21/08/2026 ele rodava em Docker na estação, como `gateway-kong`. Depois
+  // do corte, virou Pod do Kubernetes na VM — e este guarda, que só sabia olhar
+  // container, passou a reprovar TODA build do gateway com
+  //
+  //     ❌ container "gateway-kong" não está no ar
+  //
+  // ⚠️ A mensagem é honesta e leva para o lugar errado: faz procurar um
+  // container caído, quando o Kong estava perfeitamente de pé — só que em
+  // outro lugar. É a terceira guarda desta semana que sobreviveu ao mundo que
+  // ela descrevia.
+  //
+  // Agora ele tenta os dois e só reprova se NENHUM responder. Assim funciona na
+  // estação (Docker) e na VM (Kubernetes) sem precisar saber onde está.
   let doGateway;
+  let origem;
+  const tentativas = [];
   try {
     doGateway = await envDoContainer(CONTAINER);
-  } catch {
-    console.error(`❌ container "${CONTAINER}" não está no ar — não dá para conferir o que vale de verdade`);
-    process.exit(1);
+    origem = `container ${CONTAINER}`;
+    console.log(`   lendo do container Docker "${CONTAINER}"`);
+  } catch (e) {
+    tentativas.push(`docker: ${e.message.split("\n")[0]}`);
+    try {
+      doGateway = await envDoPod();
+      origem = `Pod ${NAMESPACE}/${ALVO}`;
+      console.log(`   lendo do Pod ${NAMESPACE}/${ALVO}`);
+    } catch (e2) {
+      tentativas.push(`kubernetes: ${e2.message.split("\n")[0]}`);
+      console.error("❌ não achei o Kong no ar — nem container, nem Pod.");
+      console.error("   não dá para conferir o que vale de verdade.");
+      for (const t of tentativas) console.error(`   ${t}`);
+      process.exit(1);
+    }
   }
 
   const problemas = [];
@@ -160,7 +221,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`✅ ${conferidas} defesas de ambiente conferidas contra o ${CONTAINER} RODANDO`);
+  console.log(`✅ ${conferidas} defesas de ambiente conferidas contra o ${origem} RODANDO`);
   console.log(`   nenhum projeto migrado ficou com defesa mais fraca do que tinha`);
 }
 
