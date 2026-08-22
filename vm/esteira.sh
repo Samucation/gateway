@@ -37,8 +37,24 @@ crumb() {
 case "$1" in
     disparar)
         C=$(crumb)
-        curl -s -o /dev/null -w "  %{http_code}\n" --max-time 30 $A \
-            -H "Jenkins-Crumb: $C" -X POST "$(job "$2")/build"
+
+        # ⚠️ Job COM parametro exige `/buildWithParameters`; sem parametro,
+        # `/build`. Trocar os dois devolve **400**, sem dizer o que faltou.
+        #
+        # 🐞 O `gateway` tem o parametro `IMPLANTAR` e por isso recusava o
+        # `/build` -- enquanto todos os outros aceitavam. Como o codigo era 400 e
+        # nao 404, parecia requisicao malformada (crumb, cabecalho, corpo), e nao
+        # "voce bateu na porta errada".
+        #
+        # Tenta com parametros primeiro; se o job nao tiver nenhum, cai no
+        # `/build`.
+        R=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 $A \
+            -H "Jenkins-Crumb: $C" -X POST "$(job "$2")/buildWithParameters")
+        case "$R" in
+            20*) echo "  $R" ;;
+            *)   curl -s -o /dev/null -w "  %{http_code}\n" --max-time 30 $A \
+                     -H "Jenkins-Crumb: $C" -X POST "$(job "$2")/build" ;;
+        esac
         ;;
 
     estado)
