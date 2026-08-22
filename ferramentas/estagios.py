@@ -545,19 +545,33 @@ SONAR_MAVEN = """
                         #     failed with ... "client version 1.32 is too old"
                         #
                         # ⚠️ Tres tentativas com o MESMO numero no log, e a cada
-                        # uma parecia faltar so mais uma variavel. Nao faltava: o
-                        # Testcontainers 1.21.3 FIXA a versao da API por dentro, e
-                        # nenhuma variavel de ambiente muda isso.
+                        # uma parecia faltar so mais uma variavel.
                         #
-                        # O conserto foi no POM do projeto, subindo a versao do
-                        # Testcontainers -- ver `<testcontainers.version>`. As
-                        # duas variaveis abaixo ficam porque sao corretas e
-                        # baratas: apontam o socket explicitamente e evitam a
-                        # negociacao.
+                        # A causa: o `docker-java` NAO le `DOCKER_API_VERSION` do
+                        # ambiente. Ele le `DOCKER_HOST`, `DOCKER_TLS_VERIFY`,
+                        # `DOCKER_CERT_PATH` e `DOCKER_CONFIG` -- e mais nada. A
+                        # versao da API vem de `api.version`, que ele busca em
+                        # propriedade de sistema ou no arquivo
+                        # `~/.docker-java.properties`.
                         #
+                        # ⚠️ Propriedade de sistema NAO SERVE aqui: o surefire
+                        # BIFURCA uma JVM propria, e `-D` do Maven nao atravessa a
+                        # bifurcacao sem mexer no POM. O ARQUIVO atravessa, porque
+                        # e lido do disco pela JVM que precisa dele.
+                        #
+                        # 🐞 E subir a versao do Testcontainers tambem nao era
+                        # saida: 1.21.3 e a mais nova PUBLICADA. Tentei "1.21.6",
+                        # que nao existe, e o build morreu em "Non-resolvable
+                        # import POM". Antes de trocar versao, conferir o que esta
+                        # publicado.
+                        #
+                        # `DOCKER_HOST` fica porque e correto e barato: aponta o
+                        # socket explicitamente, em vez de deixar adivinhar.
+                        echo "api.version=1.44" > docker-java.properties
+
                         # `jacoco:report` explicito porque o POM prende o relatorio
                         # ao `verify`, que nao acontece num `mvn test`.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=unix:///var/run/docker.sock -e DOCKER_API_VERSION=1.44 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=unix:///var/run/docker.sock -v "$PWD/docker-java.properties:/root/.docker-java.properties:ro" -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
