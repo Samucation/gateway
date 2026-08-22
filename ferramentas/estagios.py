@@ -467,16 +467,38 @@ SONAR_MAVEN = """
                         # instrumentando a JVM DOS TESTES, entao o portao recebia
                         # 0%% e reprovava projetos que estao bem testados.
                         #
-                        # ⚠️ Roda so o surefire (`*Test.java`). Os `*IT.java`
-                        # sobem conteiner via Testcontainers e ficam de fora de
-                        # proposito -- conferido: no sigma-payments sao 14 e no
-                        # system-api 9, todos com sufixo IT. Incluir aqui exigiria
-                        # entregar o socket do Docker ao conteiner do Maven, e
-                        # isso e decisao separada.
+                        # ⚠️ Roda so o surefire. Os `*IT.java` ficam de fora --
+                        # sao 14 no sigma-payments e 9 no system-api.
+                        #
+                        # 🐞 MAS O SUREFIRE NAO PEGA SO `*Test.java`.
+                        #
+                        # O padrao dele inclui `**/*Tests.java` tambem, e o
+                        # `SigmaPaymentsApplicationTests` -- com S no fim -- sobe
+                        # Postgres por Testcontainers. Este comentario dizia que
+                        # nada aqui precisava do Docker, e estava errado: a
+                        # esteira do sigma-payments reprovava por isso.
+                        #
+                        #   Can't get Docker image: RemoteDockerImage(
+                        #     imageName=postgres:16-alpine ...)
+                        #   at DockerClientProviderStrategy.getFirstValidStrategy
+                        #
+                        # ⚠️ A mensagem fala da IMAGEM, e a imagem estava no disco
+                        # da VM o tempo todo -- eu cheguei a conferir com um
+                        # `docker pull` e ela veio na hora. O que faltava era o
+                        # SOCKET: dentro do conteiner nao ha daemon nenhum para
+                        # perguntar, e o Testcontainers reporta isso como se a
+                        # imagem nao existisse.
+                        #
+                        # `-v /var/run/docker.sock` entrega o daemon do HOST. Nao
+                        # e privilegio novo nesta esteira -- ela ja roda
+                        # `docker build` direto, com o mesmo daemon. E com
+                        # `--network host` os conteineres que o Testcontainers
+                        # sobe ficam alcancaveis por `localhost`, que e onde o
+                        # teste os procura.
                         #
                         # `jacoco:report` explicito porque o POM prende o relatorio
                         # ao `verify`, que nao acontece num `mvn test`.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
