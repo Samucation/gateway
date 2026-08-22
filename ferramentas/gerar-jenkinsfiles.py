@@ -708,6 +708,10 @@ for p in PROJETOS:
         testes = estagios.TESTES_DART % {
             'imagem': p['dart_imagem'],
             'pastas': ' '.join(p['dart_pastas']),
+            # A imagem de teste carrega a VERSAO no nome. Um `esteira-dart:latest`
+            # compartilhado faria um projeto testar na versao que o outro
+            # construiu por ultimo -- e o estrago apareceria em outro repo.
+            'tag': 'esteira-' + p['dart_imagem'].replace(':', '-').replace('.', '-'),
         }
 
     partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)

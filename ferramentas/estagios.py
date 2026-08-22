@@ -823,9 +823,39 @@ TESTES_DART = """
                 sh '''
                     set -e
                     set -o pipefail
+
+                    # ---------------------------------------------------------
+                    # 🐞 A IMAGEM OFICIAL DO DART NAO TRAZ O `libsqlite3.so`.
+                    # ---------------------------------------------------------
+                    # Os testes que gravam no SQLite -- os que provam isolamento
+                    # entre clientes, exigidos pelas Regras de Ouro -- morriam
+                    # com "Failed to load dynamic library", e o que aparecia no
+                    # log era `LateInitializationError: Local 'db' has not been
+                    # initialized`: o erro do tearDown, nao a causa. Facil
+                    # atribuir a teste mal escrito e sair mexendo no teste.
+                    #
+                    # ⚠️ Aqui a biblioteca entra numa CAMADA, e nao num
+                    # `apt-get` a cada rodada: o Docker guarda a camada, entao
+                    # so a primeira construcao vai a rede. Um `apt-get` por
+                    # execucao deixaria a esteira refem do espelho do Debian.
+                    # ⚠️ E o pacote sozinho NAO basta: `libsqlite3-0` instala
+                    # so o `libsqlite3.so.0`, com a versao no nome, e o Dart
+                    # procura por `libsqlite3.so` sem versao. A primeira
+                    # tentativa instalou o pacote e os testes continuaram
+                    # falhando exatamente com o mesmo erro -- por isso o
+                    # atalho para o nome que ele procura.
+                    #
+                    # O `-` manda o Dockerfile pela ENTRADA e nao usa contexto
+                    # nenhum: mandar o repositorio inteiro para o Docker so para
+                    # instalar uma biblioteca custaria segundos a cada rodada.
+                    docker build -q -t %(tag)s - > /dev/null <<'FIM'
+FROM %(imagem)s
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/* && ln -sf "$(ldconfig -p | awk '/libsqlite3.so.0/ { print $NF; exit }')" /usr/lib/libsqlite3.so
+FIM
+
                     for pasta in %(pastas)s; do
                         echo "==> testando $pasta"
-                        docker run --rm -v "$PWD:/app" -w "/app/$pasta" %(imagem)s sh -c "dart pub get && dart test --reporter=expanded"
+                        docker run --rm -v "$PWD:/app" -w "/app/$pasta" %(tag)s sh -c "dart pub get && dart test --reporter=expanded"
                     done
                 '''
             }
