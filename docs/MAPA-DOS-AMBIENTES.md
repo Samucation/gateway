@@ -40,6 +40,24 @@ aba errada e mexer em produção achando que é teste.
 O interno existe para a verificação da esteira **não depender do túnel**. Se ela
 usasse o domínio público, uma queda de túnel apareceria como "o deploy falhou".
 
+
+### As duas telas do Jenkins
+
+Todo projeto aqui é *multibranch*: na tela inicial aparece a **pasta**, e o job
+de verdade (`main`) está um clique adentro. Com dez projetos, saber o estado
+geral custava dez cliques — e é por isso que ninguém olhava.
+
+    https://jenkins.cursodetecnologia.dev.br/view/Painel/
+    https://jenkins.cursodetecnologia.dev.br/view/Todas%20as%20esteiras/
+
+O **Painel** é mural: cada esteira é um cartão colorido, com a barra de
+progresso de quem está construindo. Serve para deixar aberto numa aba.
+
+**Todas as esteiras** é a lista, com última execução, duração e tendência.
+
+⚠️ As duas filtram por `.*/main$` — o nome COMPLETO do job multibranch. Filtrar
+só por `main` não casa com nada. E como é regex, **projeto novo entra sozinho**.
+
 ---
 
 ## 2. O que NUNCA mexer
