@@ -250,6 +250,38 @@ pipeline {{
                     #
                     # Percentual tambem engana entre maquinas: 20% livres de 57 GB
                     # sao 11 GB; de 20 GB sao 4 GB, e nao cabe.
+                    # ⚠️ E ANTES DO DISCO, A CARGA -- porque aqui quem paga e
+                    # PRODUCAO.
+                    #
+                    # 🐞 Em 22/08/2026 esta maquina chegou a `load average 40`
+                    # com 8 nucleos. As aplicacoes continuaram respondendo 200
+                    # POR DENTRO, mas o cloudflared nao teve CPU para atender: os
+                    # 20 dominios de producao passaram a devolver 502, e o SSH
+                    # parou de aceitar conexao.
+                    #
+                    # ⚠️ O sintoma leva para o lugar errado. `502` faz procurar
+                    # aplicacao caida; o SSH mudo faz pensar que a maquina caiu.
+                    # Nao era nada disso -- era construcao demais ao mesmo tempo,
+                    # nesta VM que roda producao e CI no mesmo hardware.
+                    #
+                    # Construir e adiavel; produzir 502 nao e. Entao a esteira
+                    # ESPERA a carga baixar, e desiste se nao baixar.
+                    NUCLEOS=$(nproc)
+                    TETO_CARGA=$(( NUCLEOS * 2 ))
+                    for _ in $(seq 1 30); do
+                        CARGA=$(awk '{{print int($1)}}' /proc/loadavg)
+                        [ "$CARGA" -le "$TETO_CARGA" ] && break
+                        echo "==> carga $CARGA acima do teto $TETO_CARGA ($NUCLEOS nucleos) -- esperando"
+                        sleep 20
+                    done
+                    CARGA=$(awk '{{print int($1)}}' /proc/loadavg)
+                    if [ "$CARGA" -gt "$TETO_CARGA" ]; then
+                        echo "ERRO: carga $CARGA ainda acima do teto $TETO_CARGA depois de 10 min."
+                        echo "Construir agora arriscaria derrubar producao com 502."
+                        exit 1
+                    fi
+                    echo "==> carga $CARGA (teto $TETO_CARGA, $NUCLEOS nucleos)"
+
                     PISO_GB=12
                     LIVRE_GB=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
                     echo "==> $LIVRE_GB GB livres antes de construir (piso: $PISO_GB GB)"
