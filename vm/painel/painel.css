@@ -20,6 +20,7 @@
   --rodando: #539bf5;
   --abortado: #909dab;
   --instavel: #c69026;
+  --aguardando: #d29922;
 }
 * { box-sizing: border-box; }
 body {
@@ -155,3 +156,34 @@ button.perigo:hover:not(:disabled) { border-color: var(--erro); color: var(--err
   animation: correndo 1s linear infinite;
 }
 @keyframes correndo { from { background-position: 0 0 } to { background-position: 22px 0 } }
+
+/* ---------------------------------------------------------------------------
+   ESPERANDO APROVACAO — o unico estado em que a esteira depende de uma PESSOA.
+   ---------------------------------------------------------------------------
+   ⚠️ Pisca de proposito. Os outros estados sao informacao e podem esperar o
+   olhar; este e um PEDIDO com prazo: passados 60 minutos sem resposta, o
+   Jenkins aborta a execucao sozinho.
+   --------------------------------------------------------------------------- */
+.esteira.aguardando {
+  border-left-color: var(--aguardando);
+  box-shadow: 0 0 0 1px var(--aguardando) inset;
+  animation: chama 2s ease-in-out infinite;
+}
+@keyframes chama {
+  0%, 100% { box-shadow: 0 0 0 1px var(--aguardando) inset; }
+  50%      { box-shadow: 0 0 0 2px var(--aguardando) inset; }
+}
+.estado.aguardando {
+  color: var(--aguardando);
+  font-weight: 680;
+  letter-spacing: .02em;
+}
+/* O botao de promover e o unico com preenchimento solido do painel: ele publica
+   em producao, e nao deve parecer mais um botao entre outros. */
+.acoes button.promover {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #0d1117;
+  font-weight: 640;
+}
+.acoes button.promover:hover:not(:disabled) { filter: brightness(1.12); }

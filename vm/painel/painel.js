@@ -61,7 +61,10 @@ async function postar(caminho) {
   if (!r.ok && r.status !== 302) throw new Error('devolveu ' + r.status);
 }
 
-function classeDe(resultado, rodando) {
+function classeDe(resultado, rodando, pendente) {
+  // ⚠️ A espera por aprovacao vem ANTES de tudo: e o unico estado em que a
+  // esteira depende de uma PESSOA, e precisa saltar aos olhos.
+  if (pendente) return 'aguardando';
   if (rodando) return 'rodando';
   if (resultado === 'SUCCESS') return 'ok';
   if (resultado === 'FAILURE') return 'erro';
@@ -69,7 +72,8 @@ function classeDe(resultado, rodando) {
   return 'abortado';
 }
 
-function textoDe(resultado, rodando) {
+function textoDe(resultado, rodando, pendente) {
+  if (pendente) return 'ESPERANDO SUA APROVACAO';
   if (rodando) return 'rodando agora';
   if (resultado === 'SUCCESS') return 'passou';
   if (resultado === 'FAILURE') return 'quebrou';
@@ -126,6 +130,20 @@ function avisar(projeto, resultado) {
   );
 }
 
+// ⚠️ `requireInteraction`: este aviso NAO some sozinho.
+//
+// Os outros podem sumir -- "terminou com sucesso" e informacao. Este e um
+// PEDIDO: a esteira esta parada esperando decisao, e some em quatro segundos
+// significaria perder a janela e deixar a build abortar por tempo.
+function avisarAprovacao(projeto) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  new Notification('⏸ ' + projeto + ' espera sua aprovação', {
+    body: 'Homologação passou. Abra o painel para promover ou descartar.',
+    tag: 'aprovacao-' + projeto,
+    requireInteraction: true,
+  });
+}
+
 async function botaoDeAviso() {
   const b = document.getElementById('permitir');
   if (!('Notification' in window)) { b.textContent = 'sem suporte a aviso'; b.disabled = true; return; }
@@ -163,6 +181,33 @@ function confirmar(titulo, texto) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// RESPONDER a pergunta pendente (promover ou descartar)
+//
+// 🐞 `proceed` NAO E OPCIONAL, e a falta dele nao da erro: ABORTA.
+//
+// O `InputStepExecution.doSubmit` do Jenkins decide entre prosseguir e rejeitar
+// olhando se existe um parametro `proceed`. Sem ele, o caminho e o de rejeicao
+// -- e a resposta ainda vem 200. Ja matei uma build assim, achando que estava
+// aprovando.
+//
+// O valor de `proceed` e o rotulo do botao declarado no passo `input`.
+// ---------------------------------------------------------------------------
+async function responder(base, id, acao) {
+  const cabecalhos = await crumb();
+  const corpo = new URLSearchParams();
+  corpo.set('proceed', 'Promover');
+  corpo.set('json', JSON.stringify({ parameter: [{ name: 'ACAO', value: acao }] }));
+
+  const r = await fetch(RAIZ + base + 'lastBuild/input/' + id + '/submit', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { ...cabecalhos, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: corpo.toString(),
+  });
+  if (!r.ok && r.status !== 302) throw new Error('devolveu ' + r.status);
+}
+
 async function carregar() {
   const sub = document.getElementById('sub');
   let jobs;
@@ -179,12 +224,12 @@ async function carregar() {
   const novaGrade = document.createDocumentFragment();
   const novasBarras = document.createDocumentFragment();
 
-  let nOk = 0, nErro = 0, nRodando = 0, nOutro = 0;
+  let nOk = 0, nErro = 0, nRodando = 0, nOutro = 0, nAguardando = 0;
 
   // Em paralelo: dez projetos em série levariam dez idas ao servidor.
   const dados = await Promise.all(jobs.map(async (j) => {
     const base = new URL(j.url).pathname.slice(1);
-    const fora = { job: j, base, ultima: null, etapas: [], historico: [], totalEsperado: 0 };
+    const fora = { job: j, base, ultima: null, etapas: [], historico: [], totalEsperado: 0, pendente: null };
     try {
       // `estimatedDuration` e o que o Jenkins calcula a partir das execucoes
       // anteriores. E dele que sai a porcentagem enquanto a esteira roda.
@@ -194,6 +239,22 @@ async function carregar() {
       const d = await pegar(base + 'lastBuild/wfapi/describe');
       fora.etapas = d.stages || [];
     } catch (e) { /* sem etapas registradas */ }
+    try {
+      // ---------------------------------------------------------------------
+      // ⚠️ A PERGUNTA PENDENTE — o único ponto em que a esteira espera VOCÊ.
+      // ---------------------------------------------------------------------
+      // Quando ela chega no portão de promoção, fica parada até alguém decidir.
+      // Sem esta consulta o cartão diria apenas "rodando", e a esteira ficaria
+      // esperando em silêncio até o prazo de 60 minutos estourar e ela abortar
+      // sozinha — que foi exatamente o que aconteceu antes de existir este
+      // painel.
+      // So pergunta se ela esta DE PE. Uma esteira parada nunca tem pergunta
+      // pendente, e consultar assim mesmo seria um 404 por projeto a cada 10 s.
+      if (fora.ultima && fora.ultima.building) {
+        const pend = await pegar(base + 'lastBuild/wfapi/nextPendingInputAction');
+        if (pend && pend.id) fora.pendente = pend;
+      }
+    } catch (e) { /* nada aguardando, que é o caso normal */ }
     try {
       // ⚠️ Quantas etapas a esteira TEM, e nao quantas ja apareceram.
       //
@@ -214,9 +275,10 @@ async function carregar() {
     const nome = d.job.fullName.replace('/main', '');
     const rodando = !!(d.ultima && d.ultima.building);
     const resultado = d.ultima ? d.ultima.result : null;
-    const cls = classeDe(resultado, rodando);
+    const cls = classeDe(resultado, rodando, d.pendente);
 
-    if (rodando) nRodando++;
+    if (d.pendente) nAguardando++;
+    else if (rodando) nRodando++;
     else if (cls === 'ok') nOk++;
     else if (cls === 'erro') nErro++;
     else nOutro++;
@@ -224,10 +286,14 @@ async function carregar() {
     // ⚠️ Avisa só na TRANSIÇÃO de rodando para parado. Sem isto, a página
     // gritaria a cada 10 segundos para toda esteira já terminada.
     const antes = anterior.get(nome);
-    if (!primeiraLeitura && antes && antes.rodando && !rodando) {
-      avisar(nome, resultado);
+    if (!primeiraLeitura && antes) {
+      if (antes.rodando && !rodando && !d.pendente) avisar(nome, resultado);
+      // ⚠️ Avisa tambem quando ela PASSA A ESPERAR -- e este e o aviso que mais
+      // importa, porque sem ele a esteira fica parada ate o prazo de 60 minutos
+      // estourar e ela abortar sozinha.
+      if (!antes.pendente && d.pendente) avisarAprovacao(nome);
     }
-    anterior.set(nome, { rodando, resultado });
+    anterior.set(nome, { rodando, resultado, pendente: !!d.pendente });
 
     const agora = d.etapas.find((s) => s.status === 'IN_PROGRESS');
 
@@ -304,7 +370,7 @@ async function carregar() {
         '<span class="nome"><a href="' + RAIZ + d.base + '">' + nome + '</a></span>' +
         '<span class="quando">' + (d.ultima ? '#' + d.ultima.number + ' · ' + quando(d.ultima.timestamp) : '') + '</span>' +
       '</div>' +
-      '<div class="estado ' + cls + '">' + textoDe(resultado, rodando) + '</div>' +
+      '<div class="estado ' + cls + '">' + textoDe(resultado, rodando, d.pendente) + '</div>' +
       (bolinhas ? '<div class="fases">' + bolinhas + '</div>' : '') +
       progresso;
 
@@ -350,8 +416,60 @@ async function carregar() {
       }
     };
 
-    acoes.appendChild(bReenviar);
-    acoes.appendChild(bParar);
+    if (d.pendente) {
+      // ⚠️ Quando a esteira espera decisao, os botoes de reenviar e parar saem
+      // da frente. O que importa naquele momento e UMA escolha, e oferecer
+      // quatro botoes convida ao clique errado.
+      const bPromover = document.createElement('button');
+      bPromover.textContent = '🚀 promover para produção';
+      bPromover.className = 'promover';
+      bPromover.onclick = async () => {
+        // ⚠️ CONFIRMA, porque isto publica em PRODUCAO.
+        //
+        // O botao fica no mesmo cartao dos outros, e um clique distraido aqui
+        // nao desperdica uma build: muda o que esta no ar para os usuarios.
+        const ok = await confirmar(
+          'Promover ' + nome + ' para PRODUÇÃO?',
+          'A execução #' + (d.ultima ? d.ultima.number : '?') + ' passou por homologação. ' +
+          'Promover aplica esta versão no ambiente REAL, que é o que seus usuários acessam. ' +
+          'A homologação continua como está.',
+        );
+        if (!ok) return;
+        bPromover.disabled = true;
+        try {
+          await responder(d.base, d.pendente.id, 'Promover');
+          sub.textContent = nome + ': promovido para produção';
+        } catch (e) {
+          sub.innerHTML = '<span class="erro-carga">não consegui promover ' + nome + ': ' + e.message + '</span>';
+          bPromover.disabled = false;
+        }
+      };
+
+      const bDescartar = document.createElement('button');
+      bDescartar.textContent = 'descartar';
+      bDescartar.onclick = async () => {
+        const ok = await confirmar(
+          'Descartar a promoção de ' + nome + '?',
+          'A esteira encerra sem publicar em produção. O que está no ar continua ' +
+          'como está, e homologação segue com esta versão.',
+        );
+        if (!ok) return;
+        bDescartar.disabled = true;
+        try {
+          await responder(d.base, d.pendente.id, 'Descartar');
+          sub.textContent = nome + ': promoção descartada';
+        } catch (e) {
+          sub.innerHTML = '<span class="erro-carga">não consegui descartar ' + nome + ': ' + e.message + '</span>';
+          bDescartar.disabled = false;
+        }
+      };
+
+      acoes.appendChild(bPromover);
+      acoes.appendChild(bDescartar);
+    } else {
+      acoes.appendChild(bReenviar);
+      acoes.appendChild(bParar);
+    }
     el.appendChild(acoes);
     novaGrade.appendChild(el);
 
@@ -379,6 +497,7 @@ async function carregar() {
   barras.replaceChildren(novasBarras);
 
   document.getElementById('resumo').innerHTML =
+    (nAguardando ? caixa(nAguardando, 'esperando voce', 'var(--aguardando)') : '') +
     caixa(nRodando, 'rodando', 'var(--rodando)') +
     caixa(nOk, 'passou', 'var(--ok)') +
     caixa(nErro, 'quebrou', 'var(--erro)') +
