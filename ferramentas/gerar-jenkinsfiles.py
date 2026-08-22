@@ -76,7 +76,7 @@ if not os.path.isdir('gateway'):
 # `deploys`: os Deployments a esperar
 # `checa`:   (host, caminho, codigo-esperado)
 PROJETOS = [
-    dict(dir='central-ia', sonar='dart', ns='central-ia',
+    dict(dir='central-ia', sonar='dart', testes='dart', dart_imagem='dart:3.9', dart_pastas=['.'], ns='central-ia',
          imagens=[('central-motor', '-t {REG}/central-motor:$TAG .'),
                   ('central-portal', '-t {REG}/central-portal:$TAG ./_portal')],
          # ⚠️ O portal e OUTRO repositorio, e o deploy dos dois mora no mesmo
@@ -90,12 +90,12 @@ PROJETOS = [
          deploys=['central-motor', 'central-portal', 'central-imagem-rembg'],
          checa=[('central-ia.hmg', '/', '200')]),
 
-    dict(dir='opuschat', sonar='dart', ns='opuschat',
+    dict(dir='opuschat', sonar='dart', testes='dart', dart_imagem='dart:3.12', dart_pastas=['platform'], ns='opuschat',
          imagens=[('opuschat', '-t {REG}/opuschat:$TAG .')],
          deploys=['opuschat-app', 'opuschat-redis'],
          checa=[('opuschat.hmg', '/', '200')]),
 
-    dict(dir='cafe-mobile-erp', sonar='dart', ns='plataforma',
+    dict(dir='cafe-mobile-erp', sonar='dart', testes='dart', dart_imagem='dart:3.12', dart_pastas=['platform', 'cafe-telegram-server'], ns='plataforma',
          imagens=[('plataforma', '-t {REG}/plataforma:$TAG .')],
          deploys=['plataforma-app', 'plataforma-redis'],
          checa=[('cafe-api.hmg', '/', '200')]),
@@ -681,6 +681,18 @@ for p in PROJETOS:
         # Ver o comentario de `TESTES_NODE_SEM_COBERTURA` em estagios.py.
         'node-sem-cobertura': estagios.TESTES_NODE_SEM_COBERTURA,
     }.get(p.get('testes'), '')
+
+    # ⚠️ Dart e PARAMETRIZADO, ao contrario dos moldes de Node.
+    #
+    # Cada projeto declara a propria versao (`dart:3.9` no central-ia, `3.12`
+    # nos outros) e as proprias pastas -- o cafe-mobile-erp tem teste em DOIS
+    # pacotes. Rodar teste numa versao diferente da que constroi a imagem e
+    # testar outra coisa.
+    if p.get('testes') == 'dart':
+        testes = estagios.TESTES_DART % {
+            'imagem': p['dart_imagem'],
+            'pastas': ' '.join(p['dart_pastas']),
+        }
 
     partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
 

@@ -829,3 +829,39 @@ TESTES_NODE_SEM_COBERTURA = """
             }
         }
 """
+
+
+# ---------------------------------------------------------------------------
+# TESTES EM DART
+#
+# ⚠️ Tres projetos deste ambiente sao Dart -- central-ia, opuschat e
+# cafe-mobile-erp -- e os tres JA TINHAM teste escrito: 126, 80 arquivos e 88
+# arquivos. Nenhum rodava na esteira, porque nao havia molde para eles.
+#
+# ⚠️ Cada projeto declara a PROPRIA versao do Dart e as PROPRIAS pastas.
+#
+# Nao da para usar uma imagem so: o `central-ia` compila com `dart:3.9` e os
+# outros com `dart:3.12`. Rodar teste numa versao diferente da que constroi a
+# imagem e testar outra coisa -- e a diferenca aparece justamente nos casos de
+# borda, que e onde o teste serve.
+#
+# ⚠️ E cada PACOTE resolve as proprias dependencias. Um `pub get` na raiz nao
+# alcanca subpacote; e por isso que o laco entra em cada pasta.
+#
+# `--reporter=expanded` porque o padrao (`compact`) reescreve a mesma linha com
+# retorno de carro -- no log do Jenkins isso vira uma linha gigante e ilegivel.
+# ---------------------------------------------------------------------------
+TESTES_DART = """
+        stage('Testes') {
+            steps {
+                sh '''
+                    set -e
+                    set -o pipefail
+                    for pasta in %(pastas)s; do
+                        echo "==> testando $pasta"
+                        docker run --rm -v "$PWD:/app" -w "/app/$pasta" %(imagem)s sh -c "dart pub get && dart test --reporter=expanded"
+                    done
+                '''
+            }
+        }
+"""
