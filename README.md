@@ -1,5 +1,11 @@
 # gateway — um Kong para todo o ambiente
 
+> ## 📍 Perdido? Comece por [`docs/MAPA-DOS-AMBIENTES.md`](docs/MAPA-DOS-AMBIENTES.md)
+>
+> Ele responde **o que roda onde**, **o que nunca mexer** e **o que conferir
+> primeiro** para cada sintoma — para não precisar redescobrir a topologia toda
+> vez que algo quebra.
+
 Hoje existem **cinco** Kongs, um por projeto, somando **4,75 GB**. Este projeto
 substitui todos por um só, com a configuração de todos centralizada aqui.
 
