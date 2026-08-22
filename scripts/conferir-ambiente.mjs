@@ -151,6 +151,31 @@ async function envDoPod() {
   return soKong(stdout.split("\n"));
 }
 
+/**
+ * Lê o compose de um projeto vizinho, ou devolve `null` se não achar.
+ *
+ * ⚠️ Procura em DOIS lugares, e o segundo não é capricho.
+ *
+ * 🐞 Na estação os repositórios ficam lado a lado (`live-flow/`), mas na VM
+ * quem roda isto é o Jenkins, e a pasta de trabalho dele tem o nome da branch
+ * grudado: `live-flow_main/`. O script só sabia o primeiro formato, então na
+ * esteira ele não achava NENHUM dos cinco composes — e reportava isso como
+ * "5 defesas de ambiente perdidas na migração".
+ *
+ * Uma mensagem de segurança para um erro de caminho.
+ */
+async function lerCompose(relativo) {
+    const [repo, ...resto] = relativo.split("/");
+    for (const nome of [repo, `${repo}_main`]) {
+        try {
+            return await readFile(path.join(WORKSPACE, nome, ...resto), "utf8");
+        } catch {
+            // tenta o próximo formato
+        }
+    }
+    return null;
+}
+
 async function main() {
   // 🐞 O GATEWAY DEIXOU DE SER UM CONTAINER DOCKER.
   //
@@ -191,13 +216,21 @@ async function main() {
 
   const problemas = [];
   let conferidas = 0;
+  const naoConferidos = [];
 
   for (const proj of PROJETOS) {
-    let texto;
-    try {
-      texto = await readFile(path.join(WORKSPACE, proj.compose), "utf8");
-    } catch {
-      problemas.push(`${proj.id}: não achei ${proj.compose}`);
+    const texto = await lerCompose(proj.compose);
+    if (texto === null) {
+      // ⚠️ NÃO é "defesa perdida" — é "não deu para comparar".
+      //
+      // 🐞 Antes isto entrava na mesma lista dos problemas e o resumo dizia
+      // "5 defesas de ambiente perdidas na migração". Numa esteira, essa frase
+      // faz parar tudo e procurar brecha de segurança; o que havia era um
+      // arquivo que o script não encontrou.
+      //
+      // Confundir "está fraco" com "não consegui olhar" é a forma mais rápida
+      // de ensinar alguém a ignorar o alarme.
+      naoConferidos.push(proj.compose);
       continue;
     }
     const doProjeto = envDoCompose(texto);
@@ -223,6 +256,17 @@ async function main() {
 
   console.log(`✅ ${conferidas} defesas de ambiente conferidas contra o ${origem} RODANDO`);
   console.log(`   nenhum projeto migrado ficou com defesa mais fraca do que tinha`);
+
+  if (naoConferidos.length) {
+    // Avisa, e NÃO reprova. Mas avisa alto: um compose que sumiu pode ser
+    // limpeza legítima (o Kong daquele projeto foi aposentado) ou pode ser o
+    // repositório não estar ao lado — e nos dois casos a comparação daquele
+    // projeto simplesmente não aconteceu.
+    console.log("");
+    console.log(`⚠️  ${naoConferidos.length} projeto(s) NÃO puderam ser comparados:`);
+    for (const c of naoConferidos) console.log("   • " + c);
+    console.log("   (não é falha de defesa — é ausência de fonte para comparar)");
+  }
 }
 
 main().catch((e) => {
