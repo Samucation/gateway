@@ -88,7 +88,18 @@ button.perigo:hover:not(:disabled) { border-color: var(--erro); color: var(--err
 .barra-linha { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
 .barra-nome { width: 168px; color: var(--fraco); text-align: right; flex: none; }
 .barra { flex: 1; height: 15px; border-radius: 4px; overflow: hidden; display: flex; background: #313945; }
-.barra i { display: block; height: 100%; }
+/* 🐞 `flex: none` NAO E ENFEITE.
+ *
+ * A primeira versao tinha so `display:block; height:100%` e uma largura em
+ * porcentagem no atributo `style`. As barras apareciam VAZIAS: os numeros ao
+ * lado diziam "2 ok · 7 erro", e o desenho era todo cinza.
+ *
+ * ⚠️ Dentro de um contentor `flex`, o padrao e `flex: 0 1 auto` -- a base vem
+ * do CONTEUDO, e estes elementos nao tem conteudo nenhum. A largura declarada
+ * era ignorada e cada um encolhia para zero.
+ *
+ * `flex: none` manda respeitar a largura declarada. */
+.barra i { display: block; height: 100%; flex: none; }
 .barra .v { background: var(--ok); }
 .barra .x { background: var(--erro); }
 .barra .a { background: var(--abortado); }

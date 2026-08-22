@@ -798,40 +798,6 @@ TESTES_NODE_SIMPLES = """
 
 
 # ---------------------------------------------------------------------------
-# TESTES SEM COBERTURA -- para quem tem teste mas nao tem o relator instalado
-#
-# ⚠️ Existe por um motivo especifico e temporario: o `sigma-financeiro` tem 901
-# testes que passam em 37 segundos, e NENHUM rodava na esteira. Ligar a
-# cobertura exigiria acrescentar `@vitest/coverage-v8` ao `package.json` dele --
-# e aquele repositorio e de LEITURA, entao a dependencia depende de autorizacao.
-#
-# ⚠️ Rodar o teste sem medir cobertura ja vale muito: o build passa a QUEBRAR
-# quando um teste quebra. Sem este estagio, 901 testes verdes na maquina de quem
-# desenvolve nao impediam nada de ir para producao.
-#
-# O que NAO muda: sem relatorio, o Sonar continua assumindo 0% de cobertura.
-# Isso ja era assim antes deste estagio existir -- ele nao piora nada.
-#
-# Quando a dependencia entrar, este molde vira `TESTES_NODE_SIMPLES` e o
-# `--coverage` volta.
-# ---------------------------------------------------------------------------
-TESTES_NODE_SEM_COBERTURA = """
-        stage('Testes') {
-            steps {
-                sh '''
-                    set -e
-                    # ⚠️ `pipefail`: sem ele um teste que falha passaria por
-                    # sucesso se houvesse cano na linha.
-                    set -o pipefail
-                    npm ci --no-audit --no-fund --ignore-scripts
-                    npx vitest run
-                '''
-            }
-        }
-"""
-
-
-# ---------------------------------------------------------------------------
 # TESTES EM DART
 #
 # ⚠️ Tres projetos deste ambiente sao Dart -- central-ia, opuschat e
