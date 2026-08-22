@@ -348,6 +348,22 @@ Aplicar 'central-ia' 'central-ia-secrets' ([ordered]@{
     RESEND_API_KEY      = ''
 })
 
+# ---------------------------------------------------------------------------
+# Sigma Payments (o microservico de adquirencia, com Keycloak e dublê da Iugu)
+# ---------------------------------------------------------------------------
+# ⚠️ `IUGU_WEBHOOK_SECRET` VAZIO, e isso e o ponto.
+#
+# E ele que valida a assinatura das notificacoes da Iugu. Com o segredo de
+# producao aqui, uma notificacao real -- reenviada, replicada, ou disparada por
+# engano contra este ambiente -- seria ACEITA como legitima por uma instancia de
+# teste. Vazio, nenhuma passa.
+Aplicar 'sigma-payments' 'sigma-payments-secrets' ([ordered]@{
+    POSTGRES_PASSWORD       = (NovaChave)
+    KEYCLOAK_ADMIN_USER     = 'admin'
+    KEYCLOAK_ADMIN_PASSWORD = (NovaChave)
+    IUGU_WEBHOOK_SECRET     = ''
+})
+
 Write-Host ''
 Write-Host '⚠️ Pagamento e envio para fora ficaram VAZIOS de proposito.' -ForegroundColor Yellow
 Write-Host '   Homologacao nao cobra ninguem e nao manda e-mail para gente de verdade.'

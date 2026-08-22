@@ -25,6 +25,17 @@ rules:
       - veltrixa
       - sigma-financeiro
       - sigma-midia
+      # 🐞 O NONO, esquecido ate 22/08/2026.
+      #
+      # A esteira do sigma-payments construia, testava e publicava -- e morria no
+      # `apply` com uma parede de
+      #
+      #     Error from server (Forbidden): ... "sigma-payments-app" is forbidden
+      #
+      # O namespace nem existia no cluster de homologacao. ⚠️ O erro fala de
+      # PERMISSAO, entao se procura RBAC; a causa era mais atras, no namespace
+      # que nunca foi criado.
+      - sigma-payments
     verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
