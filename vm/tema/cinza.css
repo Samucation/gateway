@@ -1,0 +1,67 @@
+/* ===========================================================================
+   TEMA CINZA — escuro, mas sem o preto que cansa
+
+   Servido em /userContent/tema/cinza.css e carregado pelo Simple Theme Plugin.
+
+   ---------------------------------------------------------------------------
+   POR QUE UM TEMA PROPRIO
+   ---------------------------------------------------------------------------
+   O plugin `dark-theme` traz UMA variante so, bem escura. O pedido foi "menos
+   escuro mas ainda escuro, cinza, mantendo o verde e o azul da esteira".
+
+   Isto NAO substitui o tema escuro: ele continua ativo e faz o trabalho pesado
+   (menus, formularios, tabelas). Aqui so se ajustam as VARIAVEIS de cor, que e
+   onde o Jenkins concentra o tom.
+
+   ---------------------------------------------------------------------------
+   ⚠️ AS CORES DE ESTADO NAO SAO MEXIDAS, E ISSO E O PONTO
+   ---------------------------------------------------------------------------
+   Verde, azul, amarelo e vermelho continuam como estao. Sao elas que dizem se a
+   esteira passou, esta rodando ou quebrou -- e num painel que se olha de longe,
+   mudar essas cores por gosto e o mesmo que apagar a informacao.
+
+   O que muda e so o FUNDO e as bordas: de quase preto para cinza-chumbo.
+   =========================================================================== */
+
+:root {
+  /* ---- os fundos, do mais escuro ao mais claro ------------------------- */
+  /* O padrao do tema escuro fica proximo de #1a1a1a. Aqui subimos para um
+     cinza-chumbo com leve tom azulado, que cansa menos em tela grande e ainda
+     mantem contraste de sobra com o texto claro. */
+  --background: #22262c;
+  --panel-header-bg: #2b3038;
+  --panel-border-color: #3a4048;
+
+  /* O cartao/painel, que fica POR CIMA do fundo. A diferenca entre os dois
+     precisa existir: sem ela, tabela e fundo viram uma mancha so. */
+  --card-background: #2b3038;
+  --very-light-grey: #2b3038;
+  --light-grey: #333941;
+  --medium-grey: #3a4048;
+
+  --text-color: #e3e8ee;
+  --text-color-secondary: #a4adb8;
+  --link-color: #79b8ff;
+  --link-visited-color: #b392f0;
+
+  --input-color: #2b3038;
+  --input-border: #3f4650;
+  --table-background: #2b3038;
+  --table-border-color: #3a4048;
+
+  /* ⚠️ Daqui para baixo, NADA e alterado de proposito:
+       --green, --blue, --yellow, --red e as variantes de estado do build.
+     Elas sao a informacao do painel. */
+}
+
+/* A barra de cima ganha um tom proprio para nao se perder no fundo. */
+#page-header,
+.app-page-header {
+  background: #1b1f24;
+  border-bottom: 1px solid #3a4048;
+}
+
+/* ⚠️ As bolinhas de estado do build ficam INTOCADAS.
+   Elas usam as cores do Jenkins (`--green`, `--red`...), e mexer nelas
+   quebraria a leitura de relance -- que e a unica coisa que um painel de
+   esteira precisa fazer bem. */
