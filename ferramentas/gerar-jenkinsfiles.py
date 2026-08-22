@@ -546,16 +546,76 @@ for p in PROJETOS:
 
     pushes = '\n'.join("                    docker push $REGISTRO/%s:$TAG" % n
                        for n, _ in p['imagens'])
+    # `|| falhou=1`, e nao `conferir` solto: com `set -e` a primeira falha
+    # abortaria o estagio, e as imagens seguintes nunca seriam conferidas. Quem
+    # esta consertando quer ver a lista INTEIRA de uma vez.
+    conferencias = '\n'.join("                    conferir %s || falhou=1" % n
+                             for n, _ in p['imagens'])
     partes.append("""
         stage('Publicar') {
             steps {
                 sh '''
                     set -e
 %s
+
+                    # ---------------------------------------------------------
+                    # 🐞 O `docker push` SAIR COM ZERO NAO PROVA NADA.
+                    # ---------------------------------------------------------
+                    # Em 22/08/2026 DOZE das treze imagens de producao estavam
+                    # no registro, com a tag listada certinha em
+                    # `/v2/<nome>/tags/list` -- e NENHUMA podia ser baixada. O
+                    # manifesto da plataforma devolvia 404.
+                    #
+                    # As esteiras estavam verdes. Producao rodava. Ela rodava
+                    # porque o containerd de cada no ainda tinha as camadas
+                    # descompactadas em disco: ninguem precisava BAIXAR nada.
+                    #
+                    # ⚠️ O estrago so apareceria num reagendamento de Pod --
+                    # despejo por disco cheio, reinicio de no, um `delete pod`.
+                    # Ai a imagem nao volta, e o servico fica fora sem que nada
+                    # tenha mudado.
+                    #
+                    # Foi assim que se descobriu: a homologacao tentou BAIXAR e
+                    # nao conseguiu.
+                    #
+                    # Por isso o push agora e CONFERIDO: resolve a tag, acha o
+                    # manifesto da plataforma e busca por digest. Se nao vier
+                    # 200, a esteira falha AQUI -- e nao dias depois, num
+                    # incidente.
+                    A='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json'
+
+                    conferir() {
+                        M=$(curl -sf -H "Accept: $A" "http://$REGISTRO/v2/$1/manifests/$TAG")
+                        if [ -z "$M" ]; then echo "    FALHA $1:$TAG -- sem manifesto no registro"; return 1; fi
+
+                        # ⚠️ Com `--provenance=false --sbom=false` o correto e um
+                        # manifesto SIMPLES. Se vier um indice, os atestados
+                        # voltaram -- e o filho da plataforma some com o tempo.
+                        if echo "$M" | grep -q '"manifests"'; then
+                            echo "    FALHA $1:$TAG -- e um INDICE; faltou --provenance=false"
+                            return 1
+                        fi
+
+                        # E os BLOBS tem que estar la. Foi isto que se perdeu: a
+                        # tag listada, o manifesto de pe, e as camadas ausentes.
+                        for B in $(echo "$M" | grep -oE 'sha256:[0-9a-f]{64}' | sort -u); do
+                            C=$(curl -s -o /dev/null -w '%%{http_code}' -I "http://$REGISTRO/v2/$1/blobs/$B")
+                            if [ "$C" != "200" ]; then
+                                echo "    FALHA $1:$TAG -- blob $B devolveu $C"
+                                return 1
+                            fi
+                        done
+                        echo "    ok  $1:$TAG"
+                    }
+
+                    echo "==> conferindo que o que subiu pode ser BAIXADO:"
+                    falhou=0
+%s
+                    [ "$falhou" = "0" ] || { echo "publicacao nao confere"; exit 1; }
                 '''
             }
         }
-""" % pushes)
+""" % (pushes, conferencias))
 
     esperas = '\n'.join(
         '                    $KUBECTL_HMG rollout status -n $NS deploy/%s --timeout=600s' % d

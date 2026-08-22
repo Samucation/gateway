@@ -61,6 +61,10 @@ ATESTADO = re.compile(r"--provenance=false")
 APLICA_HMG = re.compile(r"overlays[/\\]hmg")
 GUARDA_HMG = re.compile(r"HMG_CONTEXTO|KUBECTL_HMG")
 
+# Quem publica imagem tem que CONFERIR que o que subiu pode ser baixado.
+PUBLICA = re.compile(r"docker\s+push\s")
+CONFERE_PUSH = re.compile(r"/blobs/")
+
 
 def conferir(arquivo: Path):
     """Devolve a lista de problemas de um Jenkinsfile."""
@@ -87,6 +91,12 @@ def conferir(arquivo: Path):
     if APLICA_HMG.search(texto) and not GUARDA_HMG.search(texto):
         problemas.append(
             "aplica `overlays/hmg` sem guarda de contexto (HMG_CONTEXTO/KUBECTL_HMG)"
+        )
+
+    if PUBLICA.search(texto) and not CONFERE_PUSH.search(texto):
+        problemas.append(
+            "faz `docker push` sem conferir que a imagem pode ser BAIXADA "
+            "(buscar os blobs em /v2/<nome>/blobs/<digest>)"
         )
 
     return problemas
