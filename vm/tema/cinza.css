@@ -23,31 +23,48 @@
    O que muda e so o FUNDO e as bordas: de quase preto para cinza-chumbo.
    =========================================================================== */
 
+/* ---------------------------------------------------------------------------
+   🐞 ORDEM: este arquivo e carregado ANTES do `theme-dark/theme.css`.
+   ---------------------------------------------------------------------------
+   O Simple Theme Plugin injeta o link dele acima do tema, entao em CSS comum o
+   tema escuro venceria e este arquivo nao teria efeito nenhum -- as regras
+   estariam la, corretas, e a tela continuaria igual.
+
+   Por isso as declaracoes levam `!important`. Nao e forca bruta por preguica: e
+   a unica forma de um arquivo carregado ANTES sobrepor um carregado DEPOIS sem
+   depender de reordenar a injecao, que o plugin nao permite controlar.
+
+   ⚠️ E o `!important` fica SO nas variaveis de FUNDO. As cores de estado
+   continuam sem ele, entao qualquer ajuste futuro do tema escuro nelas
+   continua valendo.
+   --------------------------------------------------------------------------- */
+
+
 :root {
   /* ---- os fundos, do mais escuro ao mais claro ------------------------- */
   /* O padrao do tema escuro fica proximo de #1a1a1a. Aqui subimos para um
      cinza-chumbo com leve tom azulado, que cansa menos em tela grande e ainda
      mantem contraste de sobra com o texto claro. */
-  --background: #22262c;
-  --panel-header-bg: #2b3038;
-  --panel-border-color: #3a4048;
+  --background: #22262c !important;
+  --panel-header-bg: #2b3038 !important;
+  --panel-border-color: #3a4048 !important;
 
   /* O cartao/painel, que fica POR CIMA do fundo. A diferenca entre os dois
      precisa existir: sem ela, tabela e fundo viram uma mancha so. */
-  --card-background: #2b3038;
-  --very-light-grey: #2b3038;
-  --light-grey: #333941;
-  --medium-grey: #3a4048;
+  --card-background: #2b3038 !important;
+  --very-light-grey: #2b3038 !important;
+  --light-grey: #333941 !important;
+  --medium-grey: #3a4048 !important;
 
-  --text-color: #e3e8ee;
-  --text-color-secondary: #a4adb8;
-  --link-color: #79b8ff;
-  --link-visited-color: #b392f0;
+  --text-color: #e3e8ee !important;
+  --text-color-secondary: #a4adb8 !important;
+  --link-color: #79b8ff !important;
+  --link-visited-color: #b392f0 !important;
 
-  --input-color: #2b3038;
-  --input-border: #3f4650;
-  --table-background: #2b3038;
-  --table-border-color: #3a4048;
+  --input-color: #2b3038 !important;
+  --input-border: #3f4650 !important;
+  --table-background: #2b3038 !important;
+  --table-border-color: #3a4048 !important;
 
   /* ⚠️ Daqui para baixo, NADA e alterado de proposito:
        --green, --blue, --yellow, --red e as variantes de estado do build.
