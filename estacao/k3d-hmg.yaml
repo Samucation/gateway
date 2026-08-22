@@ -75,11 +75,33 @@ registries:
   # "conteúdo não encontrado", que manda procurar a imagem errada.
   #
   # Para HTTP puro basta o endpoint com `http://`, e nada mais.
+  #
+  # ---------------------------------------------------------------------------
+  # ⚠️ VÁRIOS ENDEREÇOS, e não um só — a VM está em DHCP.
+  # ---------------------------------------------------------------------------
+  # 🐞 Em 22/08/2026 a VM trocou de `192.168.15.55` para `.56` sozinha, no meio
+  # do dia. O espelho continuou apontando para o endereço velho e a homologação
+  # parou de conseguir baixar imagem — com o registro perfeitamente de pé, no
+  # endereço novo.
+  #
+  # ⚠️ O sintoma é `ImagePullBackOff`, que faz procurar defeito na imagem, no
+  # push ou no manifesto. Nada disso: é o número de telefone que mudou.
+  #
+  # O containerd tenta os endpoints EM ORDEM e usa o primeiro que responder.
+  # Listar a faixa provável custa alguns segundos quando o primeiro está morto, e
+  # evita que a próxima troca derrube homologação.
+  #
+  # ⚠️ Isto é REMENDO, não conserto. O conserto é reserva de DHCP no roteador
+  # (ou IP fixo na VM) — ver `gateway/vm/IP-OSCILANDO.md`. Enquanto o endereço
+  # oscilar, esta lista é o que segura.
   config: |
     mirrors:
       "localhost:32000":
         endpoint:
+          - "http://192.168.15.56:32000"
           - "http://192.168.15.55:32000"
+          - "http://192.168.15.54:32000"
+          - "http://192.168.15.57:32000"
 
 options:
   k3s:

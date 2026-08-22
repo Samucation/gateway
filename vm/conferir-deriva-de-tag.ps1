@@ -29,7 +29,16 @@ O apply nao teria voltado a versao -- teria derrubado producao em
 Roda daqui, por SSH. Nao altera nada; so compara e conta.
 #>
 param(
-    [string]$Vm      = '192.168.15.55',
+    # ⚠️ VAZIO por padrao: o endereco e DESCOBERTO, nao chutado.
+    #
+    # 🐞 Estava fixo em `192.168.15.55`. Em 22/08/2026 a VM trocou para `.56`
+    # sozinha, e este script passou a nao conseguir falar com o cluster --
+    # reportando as tags como "NAO ESTA RODANDO", que e exatamente o alarme que
+    # ele existe para dar. Guarda que grita errado ensina a ignorar o alarme.
+    #
+    # `achar-vm.ps1` varre a faixa e CONFERE O NOME da maquina antes de devolver
+    # o endereco, entao ele nao entrega o aparelho errado.
+    [string]$Vm      = '',
     [string]$Usuario = 'usuario',
     [string]$Chave   = "$env:USERPROFILE\.ssh\id_hmg_veltrixa"
 )
@@ -39,6 +48,14 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $raiz = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+
+if (-not $Vm) {
+    $Vm = (& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'achar-vm.ps1') |
+           Select-Object -Last 1).Trim()
+    if (-not $Vm) { throw 'nao achei a VM na rede -- veja vm/IP-OSCILANDO.md' }
+    Write-Host "  VM encontrada em $Vm" -ForegroundColor DarkGray
+}
+
 $ssh  = @('-i', $Chave, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no', "$Usuario@$Vm")
 
 # Namespace de cada repositorio. Nem sempre e o nome da pasta -- `live-flow`
