@@ -536,6 +536,25 @@ SONAR_MAVEN = """
                         # `EnvironmentAndSystemPropertyClientProviderStrategy` vem
                         # primeiro, e essa LE as duas.
                         #
+                        # 🐞 E NEM ASSIM a variavel de ambiente foi lida.
+                        #
+                        # Com `DOCKER_HOST` definido a estrategia certa passou a
+                        # ser tentada -- e ELA TAMBEM reportou 1.32:
+                        #
+                        #   EnvironmentAndSystemPropertyClientProviderStrategy:
+                        #     failed with ... "client version 1.32 is too old"
+                        #
+                        # ⚠️ Tres tentativas com o MESMO numero no log, e a cada
+                        # uma parecia faltar so mais uma variavel. Nao faltava: o
+                        # Testcontainers 1.21.3 FIXA a versao da API por dentro, e
+                        # nenhuma variavel de ambiente muda isso.
+                        #
+                        # O conserto foi no POM do projeto, subindo a versao do
+                        # Testcontainers -- ver `<testcontainers.version>`. As
+                        # duas variaveis abaixo ficam porque sao corretas e
+                        # baratas: apontam o socket explicitamente e evitam a
+                        # negociacao.
+                        #
                         # `jacoco:report` explicito porque o POM prende o relatorio
                         # ao `verify`, que nao acontece num `mvn test`.
                         docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=unix:///var/run/docker.sock -e DOCKER_API_VERSION=1.44 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
