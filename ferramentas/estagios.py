@@ -766,6 +766,25 @@ PROMOCAO = """
                     A='"'
                     sed -i "s|newTag: .*|newTag: ${A}${TAG}${A}|" "$K"
                     $KUBECTL apply -k k8s/overlays/prd
+
+                    # -------------------------------------------------------------
+                    # 🐞 `apply` DEVOLVE ZERO ANTES DE A VERSAO NOVA SUBIR.
+                    # -------------------------------------------------------------
+                    # Ele so registra a intencao no cluster. Sem esperar aqui, a
+                    # esteira fechava VERDE no instante do apply -- e um Pod que
+                    # subisse quebrando ficaria em CrashLoopBackOff sem ninguem
+                    # saber, com o painel dizendo "promovido com sucesso".
+                    #
+                    # ⚠️ Verde que nao prova nada e pior que vermelho: e o defeito
+                    # que esta esteira inteira existe para nao repetir.
+                    #
+                    # O `rollout status` so volta quando as replicas novas estao de
+                    # pe e prontas; se nao ficarem, ele estoura o prazo e a
+                    # promocao fica VERMELHA, que e a verdade.
+                    for r in $($KUBECTL get deploy,statefulset -n "$NS" -o name); do
+                        echo "==> esperando $r"
+                        $KUBECTL rollout status -n "$NS" "$r" --timeout=300s
+                    done
                 '''
             }
         }
