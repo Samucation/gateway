@@ -662,3 +662,28 @@ PROMOCAO = """
             }
         }
 """
+
+# ---------------------------------------------------------------------------
+# TESTES COM COBERTURA -- projetos Node cujos testes NAO precisam de banco
+#
+# ⚠️ Diferente do `TESTES_NODE`: aquele sobe um Postgres descartavel porque o
+# conjunto do live-flow fala com banco a cada caso. Aqui os testes sao de
+# LOGICA PURA -- fisica, contas de contraste, traducao de linha para JSON -- e
+# subir banco seria custo sem retorno: mais 30 segundos por build e mais uma
+# peca para falhar num lugar onde nada depende dela.
+# ---------------------------------------------------------------------------
+TESTES_NODE_SIMPLES = """
+        stage('Testes + cobertura') {
+            steps {
+                sh '''
+                    set -e
+                    # ⚠️ `pipefail`: sem ele um teste que falha passaria por
+                    # sucesso se houvesse cano na linha.
+                    set -o pipefail
+                    npm ci --no-audit --no-fund --ignore-scripts
+                    npx vitest run --coverage
+                    echo "==> cobertura em coverage/lcov.info"
+                '''
+            }
+        }
+"""

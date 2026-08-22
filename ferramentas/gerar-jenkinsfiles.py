@@ -113,7 +113,7 @@ PROJETOS = [
          # credencial -- um deploy que abrisse a API passaria em todo o resto.
          checa=[('urupix.hmg', '/', '200')]),
 
-    dict(dir='sprinklegames-portal', sonar='node', ns='sprinklegames',
+    dict(dir='sprinklegames-portal', sonar='node', testes='node-simples', ns='sprinklegames',
          imagens=[('sprinklegames-portal', '-t {REG}/sprinklegames-portal:$TAG .')],
          deploys=['sprinklegames-portal'],
          checa=[('sprinklegames.hmg', '/', '200')]),
@@ -563,13 +563,26 @@ for p in PROJETOS:
     # empurrar para o registro uma imagem que o portao vai reprovar.
     sonar = {'maven': estagios.SONAR_MAVEN}.get(p.get('sonar'), estagios.SONAR_GENERICO)
 
-    # ⚠️ O estagio de TESTES so entra em quem tem `testes='node'`.
+    # ⚠️ O estagio de TESTES so entra em quem declara `testes`.
     #
     # Sem relatorio de cobertura o Sonar assume 0% e o portao reprova todo
     # build -- entao ligar o portao sem ligar os testes e garantir vermelho
     # eterno. Os dois andam juntos, por projeto, conforme cada um ganha a
     # infraestrutura de teste na esteira.
-    testes = estagios.TESTES_NODE if p.get('testes') == 'node' else ''
+    #
+    # ⚠️ DOIS moldes, porque os projetos precisam de coisas diferentes:
+    #
+    #   `node`          sobe um Postgres descartavel -- o conjunto do live-flow
+    #                   fala com banco em quase todo caso.
+    #   `node-simples`  nao sobe nada. Os testes do portal sao de LOGICA PURA
+    #                   (fisica do espectro, conta de contraste, traducao de
+    #                   linha para JSON); subir banco onde nada o usa custaria
+    #                   30 segundos por build e acrescentaria uma peca para
+    #                   falhar, sem retorno nenhum.
+    testes = {
+        'node': estagios.TESTES_NODE,
+        'node-simples': estagios.TESTES_NODE_SIMPLES,
+    }.get(p.get('testes'), '')
 
     partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
 
