@@ -496,9 +496,30 @@ SONAR_MAVEN = """
                         # sobe ficam alcancaveis por `localhost`, que e onde o
                         # teste os procura.
                         #
+                        # 🐞 E `DOCKER_API_VERSION` NAO E OPCIONAL.
+                        #
+                        # Com o socket montado, o erro MUDOU mas continuou:
+                        #
+                        #   UnixSocketClientProviderStrategy: failed with
+                        #   BadRequestException (Status 400:
+                        #   {"message":"client version 1.32 is too old"})
+                        #   -> Could not find a valid Docker environment
+                        #
+                        # ⚠️ A mensagem final fala em "ambiente Docker nao
+                        # encontrado", e o socket estava ali. Quem recusou foi o
+                        # DAEMON: o Docker 29 desta VM aceita API >= 1.40, e o
+                        # docker-java que o Testcontainers 1.21 usa negocia 1.32.
+                        #
+                        # Ou seja: a biblioteca envelheceu em relacao ao daemon, e
+                        # o sintoma aponta para configuracao de ambiente. Fixar a
+                        # versao resolve sem mexer em dependencia de projeto
+                        # nenhum. `1.44` esta dentro da faixa aceita (o daemon
+                        # anuncia 1.55) e e velha o bastante para qualquer
+                        # daemon recente.
+                        #
                         # `jacoco:report` explicito porque o POM prende o relatorio
                         # ao `verify`, que nao acontece num `mvn test`.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_API_VERSION=1.44 -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
