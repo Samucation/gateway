@@ -65,8 +65,26 @@ print("  #%s  rodando=%s  resultado=%s" % (d.get("number"), d.get("building"), d
         [ "$1" = "descartar" ] && ACAO=Descartar
 
         C=$(crumb)
+
+        # ⚠️ `proceed` NAO E OPCIONAL, e a falta dele nao da erro: ABORTA.
+        #
+        # 🐞 A primeira versao mandava so o `json=` com os parametros. O
+        # `InputStepExecution.doSubmit` do Jenkins decide entre prosseguir e
+        # abortar olhando se existe um parametro `proceed` na requisicao --
+        # sem ele, o caminho e o de rejeicao.
+        #
+        # O POST devolveu 200 e o build terminou com:
+        #
+        #     Rejected by claude-automacao
+        #     Finished: ABORTED
+        #
+        # Ou seja: a chamada de APROVAR abortou a build, e o codigo HTTP disse
+        # que deu certo. Foi assim que a build #24 do sprinklegames morreu.
+        #
+        # O valor de `proceed` e o rotulo do botao (`ok:` do passo `input`).
         curl -s -o /dev/null -w "  %{http_code}\n" --max-time 30 $A \
             -H "Jenkins-Crumb: $C" -X POST \
+            --data-urlencode "proceed=Promover" \
             --data-urlencode "json={\"parameter\":[{\"name\":\"ACAO\",\"value\":\"$ACAO\"}]}" \
             "$(job "$2")/lastBuild/input/$ID/submit"
         ;;
