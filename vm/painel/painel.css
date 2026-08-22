@@ -1,0 +1,113 @@
+/* ===========================================================================
+   Painel das esteiras — folha de estilo.
+
+   ⚠️ SEPARADA do HTML de propósito.
+
+   O Jenkins serve `/userContent` com uma política de segurança restrita. Para a
+   página funcionar sem afrouxar essa política com `unsafe-inline` — que
+   liberaria QUALQUER script embutido em QUALQUER página servida por ali —, o
+   estilo e o script moram em arquivos próprios. Assim a política pode ser
+   `script-src 'self'; style-src 'self'`, que é estreita.
+   =========================================================================== */
+:root {
+  --fundo: #1c2128;
+  --cartao: #262c36;
+  --linha: #373e47;
+  --texto: #e6edf3;
+  --fraco: #9198a1;
+  --ok: #57ab5a;
+  --erro: #e5534b;
+  --rodando: #539bf5;
+  --abortado: #909dab;
+  --instavel: #c69026;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px;
+  background: var(--fundo); color: var(--texto);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+.sub { color: var(--fraco); font-size: 13px; margin-bottom: 16px; }
+
+.barra-topo { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+.resumo { display: flex; gap: 10px; flex-wrap: wrap; flex: 1; }
+.caixa {
+  background: var(--cartao); border: 1px solid var(--linha);
+  border-radius: 10px; padding: 10px 15px; min-width: 104px;
+}
+.caixa .n { font-size: 24px; font-weight: 680; line-height: 1.1; }
+.caixa .r { color: var(--fraco); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+button {
+  font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--cartao); color: var(--texto);
+  border: 1px solid var(--linha); border-radius: 7px; padding: 6px 12px;
+}
+button:hover:not(:disabled) { border-color: var(--fraco); }
+button:disabled { opacity: .4; cursor: default; }
+button.perigo:hover:not(:disabled) { border-color: var(--erro); color: var(--erro); }
+
+.grade { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.esteira {
+  background: var(--cartao); border: 1px solid var(--linha);
+  border-left: 4px solid var(--abortado);
+  border-radius: 10px; padding: 13px 15px;
+}
+.esteira.ok { border-left-color: var(--ok); }
+.esteira.erro { border-left-color: var(--erro); }
+.esteira.rodando { border-left-color: var(--rodando); }
+.esteira.instavel { border-left-color: var(--instavel); }
+
+.topo { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.nome { font-weight: 640; }
+.nome a { color: inherit; text-decoration: none; }
+.nome a:hover { text-decoration: underline; }
+.quando { color: var(--fraco); font-size: 12px; white-space: nowrap; }
+
+.estado { font-size: 13px; margin-top: 2px; }
+.estado.ok { color: var(--ok); } .estado.erro { color: var(--erro); }
+.estado.rodando { color: var(--rodando); } .estado.instavel { color: var(--instavel); }
+.estado.abortado { color: var(--abortado); }
+
+.fases { display: flex; gap: 3px; margin-top: 9px; flex-wrap: wrap; }
+.fase { height: 6px; flex: 1 1 8px; min-width: 8px; border-radius: 3px; background: #3a424e; }
+.fase.ok { background: var(--ok); }
+.fase.erro { background: var(--erro); }
+.fase.agora { background: var(--rodando); animation: pulsa 1.1s ease-in-out infinite; }
+.fase.pulada { background: #4a3f26; }
+@keyframes pulsa { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+
+.agora-nome { margin-top: 6px; font-size: 12px; color: var(--rodando); }
+.agora-nome b { font-weight: 640; }
+
+.acoes { display: flex; gap: 7px; margin-top: 11px; }
+.acoes button { padding: 4px 11px; font-size: 12px; }
+
+.grafico { margin-top: 24px; background: var(--cartao); border: 1px solid var(--linha); border-radius: 10px; padding: 15px; }
+.barra-linha { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+.barra-nome { width: 168px; color: var(--fraco); text-align: right; flex: none; }
+.barra { flex: 1; height: 15px; border-radius: 4px; overflow: hidden; display: flex; background: #313945; }
+.barra i { display: block; height: 100%; }
+.barra .v { background: var(--ok); }
+.barra .x { background: var(--erro); }
+.barra .a { background: var(--abortado); }
+.barra-num { width: 124px; color: var(--fraco); font-size: 12px; flex: none; }
+
+.aviso { color: var(--fraco); font-size: 12px; margin-top: 14px; }
+.erro-carga { color: var(--erro); }
+
+/* A caixa de confirmação. Feita à mão porque `confirm()` do navegador é
+   bloqueado em algumas configurações e não dá para explicar o que vai parar. */
+.veu {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.veu[hidden] { display: none; }
+.dialogo {
+  background: var(--cartao); border: 1px solid var(--linha);
+  border-radius: 12px; padding: 20px 22px; max-width: 430px;
+}
+.dialogo h2 { margin: 0 0 8px; font-size: 16px; }
+.dialogo p { margin: 0 0 16px; color: var(--fraco); font-size: 13px; }
+.dialogo .botoes { display: flex; gap: 9px; justify-content: flex-end; }
