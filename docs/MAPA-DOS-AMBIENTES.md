@@ -58,6 +58,29 @@ progresso de quem está construindo. Serve para deixar aberto numa aba.
 ⚠️ As duas filtram por `.*/main$` — o nome COMPLETO do job multibranch. Filtrar
 só por `main` não casa com nada. E como é regex, **projeto novo entra sozinho**.
 
+### O painel próprio, e o portão de produção nele
+
+    https://jenkins.cursodetecnologia.dev.br/userContent/painel/painel.html
+
+Fonte em `vm/painel/`. Lê a cada 10 s e mostra, por cartão, a fase atual, a
+porcentagem, e botões de reenviar e parar.
+
+🔴 **O estado que importa é `ESPERANDO SUA APROVAÇÃO`** — cartão amarelo,
+piscando, com aviso de sistema que **não some sozinho**. É o único momento em
+que a esteira depende de uma pessoa, e tem prazo: passados 60 minutos sem
+resposta, o Jenkins aborta a execução depois de todo o trabalho já feito.
+
+⚠️ Ao aprovar pela API, `proceed` **não é opcional** e a falta dele não dá
+erro: o `InputStepExecution.doSubmit` vai pelo caminho da REJEIÇÃO e ainda
+responde **200**. O valor é o rótulo do botão (`ok:` do passo `input`):
+
+    curl -X POST -u <user>:<token> -H "$CRUMB" \
+      --data-urlencode 'proceed=Promover' \
+      --data-urlencode 'json={"parameter":[{"name":"ACAO","value":"Promover"}]}' \
+      "$JENKINS/job/<projeto>/job/main/lastBuild/input/<id>/submit"
+
+Uma build já foi morta assim, com quem apertava achando que estava aprovando.
+
 ---
 
 ## 2. O que NUNCA mexer
@@ -140,14 +163,88 @@ rota fora da lista de liberadas, não serviço quebrado.
 
 ### “A esteira está verde mas nada mudou”
 
-As três causas já vistas, todas silenciosas:
+As quatro causas já vistas, todas silenciosas:
 
 - **atestados** — imagem no registro, impossível de baixar;
 - **guarda com contexto errado** — aplicou no cluster errado;
-- **`-DskipTests`** — o teste nunca rodou.
+- **`-DskipTests`** — o teste nunca rodou;
+- **`kubectl apply` sem espera** — ele devolve zero quando o cluster **aceita
+  a intenção**, não quando a versão nova sobe. Um Pod em `CrashLoopBackOff`
+  passava por promoção bem-sucedida. Desde 22/08/2026 o estágio de produção
+  espera o `rollout status` de todo deployment e statefulset do namespace.
 
 Rode `python ferramentas/conferir-esteiras.py`: ele varre os 11 repositórios
 procurando exatamente isso.
+
+### “O portão de qualidade acusa 0% de cobertura, com a suíte passando”
+
+O Sonar lê o arquivo apontado por `sonar.javascript.lcov.reportPaths`, que é
+`coverage/lcov.info`. **Relatório ausente não vira reclamação: vira zero.**
+
+⚠️ Os relatórios padrão do `@vitest/coverage-v8` são `text`, `html`, `clover` e
+`json` — **`lcov` não está entre eles**. Um projeto que não o declare
+explicitamente entrega cobertura real de 80% e aparece com 0,0% no portão.
+
+Aconteceu no `sigma-financeiro` em 22/08/2026, com 902 testes passando. O
+número errado é caro porque é plausível: leva a escrever teste para código já
+testado. Confira antes de acreditar:
+
+```bash
+ls -l coverage/lcov.info && grep -c '^SF:' coverage/lcov.info
+```
+
+Arquivo **ausente do lcov** também conta como 0% — não só arquivo com linhas
+descobertas. Componentes de tela que nenhum teste importa entram nessa conta.
+
+### “O portão exige revisão de *security hotspot*”
+
+A condição `new_security_hotspots_reviewed = 100%` **não pode ser satisfeita
+por esteira nenhuma**: hotspot é revisado por uma pessoa na tela do Sonar, que
+marca cada um como seguro ou a corrigir. Enquanto ninguém revisar, o portão
+reprova — e o log da esteira não diz isso com todas as letras.
+
+⚠️ O token da esteira **não tem permissão** para listar hotspots pela API
+(`Insufficient privileges`), então nem dá para saber quais são sem entrar na
+tela.
+
+### “O teste em Dart morre com `LateInitializationError`”
+
+Leia **as linhas de cima**. A causa costuma ser:
+
+```
+Failed to load dynamic library 'libsqlite3.so'
+```
+
+O `LateInitializationError: Local 'db' has not been initialized` é o erro do
+`tearDown` — o `setUp` já tinha morrido. Lido de cima para baixo, o log acusa
+teste mal escrito, e o conserto “natural” seria mexer no teste, que está certo.
+
+A imagem oficial `dart:3.12` não traz a biblioteca. ⚠️ E instalar
+`libsqlite3-0` **não basta**: o pacote entrega `libsqlite3.so.0`, com a versão
+no nome, e o Dart procura `libsqlite3.so` sem versão — os testes continuam
+falhando com a mesma mensagem, o que convida a concluir que o pacote não
+adiantou. O `TESTES_DART` em `ferramentas/estagios.py` instala o pacote **e**
+cria o atalho.
+
+### “O Keycloak fica reiniciando”
+
+Olhe o motivo do término, não só o log:
+
+```bash
+kubectl get pod -n <ns> <pod> -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}'
+```
+
+`OOMKilled` na partida é teto de memória, não instabilidade. ⚠️ Sem
+`--optimized`, a partida roda **duas JVMs** — a que recompila a configuração e
+a do servidor — e cada uma toma até 70% da memória do contêiner para heap.
+
+Em homologação o sintoma é `CrashLoopBackOff`; em produção ele **sobe depois de
+várias tentativas**, e aí parece instabilidade do Keycloak. Foi assim que
+passou despercebido por 42 horas no `veltrixa`, com 40 reinícios.
+
+A correção está no `system-api`: `JAVA_OPTS_APPEND` com `MaxRAMPercentage=50` e
+teto de 1,5 Gi, mantendo `requests` em 512Mi — o pico dura segundos e reservar
+1,5 Gi tiraria memória do cluster inteiro o tempo todo.
 
 ### “O nginx não sobe”
 
