@@ -122,3 +122,36 @@ button.perigo:hover:not(:disabled) { border-color: var(--erro); color: var(--err
 .dialogo h2 { margin: 0 0 8px; font-size: 16px; }
 .dialogo p { margin: 0 0 16px; color: var(--fraco); font-size: 13px; }
 .dialogo .botoes { display: flex; gap: 9px; justify-content: flex-end; }
+
+/* ---------------------------------------------------------------------------
+   O PASSO A PASSO: barra de progresso e a linha que diz o que esta rodando.
+
+   ⚠️ Existe para nao se olhar as cegas. Um cartao que so diz "rodando agora"
+   nao distingue "esta compilando ha 20 segundos" de "travou na mesma fase ha
+   oito minutos" -- e essa e justamente a pergunta de quem esta esperando.
+   --------------------------------------------------------------------------- */
+.progresso {
+  height: 5px; border-radius: 3px; background: #3a424e;
+  margin-top: 10px; overflow: hidden;
+}
+.progresso i {
+  display: block; height: 100%; background: var(--rodando);
+  /* A transicao suaviza o salto entre leituras (10 s). Sem ela a barra pula. */
+  transition: width .6s ease;
+}
+.passo {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin-top: 6px; font-size: 12px; color: var(--fraco);
+}
+.passo b { color: var(--texto); font-weight: 620; }
+.passo .pct { white-space: nowrap; }
+
+/* Na fila: a barra fica listrada e andando, para nao parecer progresso real.
+   ⚠️ Cheia e parada seria pior que nada -- pareceria "quase pronto". */
+.progresso.aguardando i {
+  background: repeating-linear-gradient(
+    45deg, #3f4855 0 8px, #4a5462 8px 16px
+  );
+  animation: correndo 1s linear infinite;
+}
+@keyframes correndo { from { background-position: 0 0 } to { background-position: 22px 0 } }

@@ -89,6 +89,16 @@ function quando(ms) {
   return Math.floor(h / 24) + ' d';
 }
 
+// Duracao em texto curto: 45s, 3m12s, 1h04m.
+function duracao(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm' + String(s % 60).padStart(2, '0') + 's';
+  return Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') + 'm';
+}
+
 function caixa(n, rotulo, cor) {
   return '<div class="caixa"><div class="n" style="color:' + cor + '">' + n +
          '</div><div class="r">' + rotulo + '</div></div>';
@@ -174,14 +184,25 @@ async function carregar() {
   // Em paralelo: dez projetos em série levariam dez idas ao servidor.
   const dados = await Promise.all(jobs.map(async (j) => {
     const base = new URL(j.url).pathname.slice(1);
-    const fora = { job: j, base, ultima: null, etapas: [], historico: [] };
+    const fora = { job: j, base, ultima: null, etapas: [], historico: [], totalEsperado: 0 };
     try {
-      fora.ultima = await pegar(base + 'lastBuild/api/json?tree=number,building,result,timestamp');
+      // `estimatedDuration` e o que o Jenkins calcula a partir das execucoes
+      // anteriores. E dele que sai a porcentagem enquanto a esteira roda.
+      fora.ultima = await pegar(base + 'lastBuild/api/json?tree=number,building,result,timestamp,estimatedDuration');
     } catch (e) { /* sem execução ainda */ }
     try {
       const d = await pegar(base + 'lastBuild/wfapi/describe');
       fora.etapas = d.stages || [];
     } catch (e) { /* sem etapas registradas */ }
+    try {
+      // ⚠️ Quantas etapas a esteira TEM, e nao quantas ja apareceram.
+      //
+      // 🐞 Uma execucao em andamento so registra as etapas que ja alcancou --
+      // foi isso que fez a esteira "parecer menor". Para dizer "fase 5 de 14" e
+      // preciso perguntar a ULTIMA EXECUCAO COMPLETA quantas existem.
+      const c = await pegar(base + 'lastCompletedBuild/wfapi/describe');
+      fora.totalEsperado = (c.stages || []).length;
+    } catch (e) { /* sem execução completa ainda */ }
     try {
       const h = await pegar(base + 'api/json?tree=builds[result,building]{0,' + QUANTAS + '}');
       fora.historico = h.builds || [];
@@ -209,6 +230,64 @@ async function carregar() {
     anterior.set(nome, { rodando, resultado });
 
     const agora = d.etapas.find((s) => s.status === 'IN_PROGRESS');
+
+    // ---- o passo a passo, para nao ficar as cegas -------------------------
+    let progresso = '';
+    if (rodando && d.etapas.length === 0) {
+      // ⚠️ ZERO etapas com a execucao "rodando" quase sempre significa FILA.
+      //
+      // 🐞 Sem este caso, a conta por tempo tomava conta: uma espera de 12
+      // minutos com nada acontecendo aparecia como "99%", porque o decorrido ja
+      // passara do previsto. A barra dizia "quase la" enquanto a esteira nem
+      // tinha comecado -- a mentira mais irritante que um painel pode contar.
+      //
+      // Com UM executor, esperar e o normal, nao a excecao.
+      const espera = d.ultima.timestamp ? Date.now() - d.ultima.timestamp : 0;
+      progresso =
+        '<div class="progresso aguardando"><i style="width:100%"></i></div>' +
+        '<div class="passo"><span>na fila, esperando executor</span>' +
+        '<span class="pct">há ' + duracao(espera) + '</span></div>';
+    } else if (rodando) {
+      const total = Math.max(d.totalEsperado, d.etapas.length);
+      const indice = d.etapas.length;
+      const decorrido = d.ultima.timestamp ? Date.now() - d.ultima.timestamp : 0;
+      const previsto = d.ultima.estimatedDuration || 0;
+
+      // ⚠️ DUAS medidas de progresso, e a maior manda.
+      //
+      // Por ETAPA e honesta mas grosseira: pula de 7% em 7% e fica parada
+      // minutos numa etapa longa, dando impressao de travamento.
+      //
+      // Por TEMPO e suave, mas mente quando a execucao passa do previsto --
+      // e ai encosta em 99% e fica la.
+      //
+      // Juntas: a barra anda sempre, e nunca finge que terminou.
+      const porEtapa = total ? (indice / total) * 100 : 0;
+      const porTempo = previsto ? Math.min((decorrido / previsto) * 100, 99) : 0;
+      const pct = Math.min(Math.max(porEtapa, porTempo), 99);
+
+      const passo = total ? 'fase ' + indice + ' de ' + total : 'fase ' + indice;
+      const tempo = duracao(decorrido) + (previsto ? ' de ~' + duracao(previsto) : '');
+
+      progresso =
+        '<div class="progresso"><i style="width:' + pct.toFixed(0) + '%"></i></div>' +
+        '<div class="passo">' +
+          '<span>' + passo + ' · <b>' + (agora ? agora.name : '…') + '</b></span>' +
+          '<span class="pct">' + pct.toFixed(0) + '% · ' + tempo + '</span>' +
+        '</div>';
+    } else if (d.etapas.length) {
+      // Parada: mostra ONDE parou. Numa que quebrou, e a primeira coisa que se
+      // quer saber -- e evita abrir o log so para descobrir a etapa.
+      const falhou = d.etapas.find((s) => s.status === 'FAILED');
+      const total = Math.max(d.totalEsperado, d.etapas.length);
+      const dur = d.etapas.reduce((a, s) => a + (s.durationMillis || 0), 0);
+      progresso =
+        '<div class="passo"><span>' +
+        (falhou ? 'parou em <b>' + falhou.name + '</b>'
+                : d.etapas.length + ' de ' + total + ' fases') +
+        '</span><span class="pct">' + duracao(dur) + '</span></div>';
+    }
+
     const bolinhas = d.etapas.map((s) => {
       let c = '';
       if (s.status === 'SUCCESS') c = 'ok';
@@ -227,7 +306,7 @@ async function carregar() {
       '</div>' +
       '<div class="estado ' + cls + '">' + textoDe(resultado, rodando) + '</div>' +
       (bolinhas ? '<div class="fases">' + bolinhas + '</div>' : '') +
-      (agora ? '<div class="agora-nome">fase: <b>' + agora.name + '</b></div>' : '');
+      progresso;
 
     const acoes = document.createElement('div');
     acoes.className = 'acoes';
