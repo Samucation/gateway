@@ -323,6 +323,31 @@ Aplicar 'sigma-midia' 'sigma-midia-secrets' ([ordered]@{
     MIDIA_ADMIN_SENHA   = (NovaChave)
 })
 
+# ---------------------------------------------------------------------------
+# Central de IA (motor + portal)
+# ---------------------------------------------------------------------------
+# ⚠️ DOIS bancos no mesmo namespace, com nomes parecidos e a MESMA senha:
+# `central-postgres-motor/central` e `central-postgres-portal/central_portal`.
+# Trocar um pelo outro nao da erro de conexao -- da tabela faltando, muito
+# depois, num lugar que nao tem nada a ver com a causa.
+$pgCentral = NovaChave
+
+Aplicar 'central-ia' 'central-ia-secrets' ([ordered]@{
+    POSTGRES_PASSWORD   = $pgCentral
+    DATABASE_URL_MOTOR  = "postgres://central:$pgCentral@central-postgres-motor:5432/central?sslmode=disable"
+    DATABASE_URL_PORTAL = "postgres://central:$pgCentral@central-postgres-portal:5432/central_portal?sslmode=disable"
+
+    MOTOR_SEGREDO       = (NovaChave)
+
+    # Cofre e cifra de credenciais. Chaves NOVAS: o que estiver cifrado com as
+    # de producao fica ilegivel aqui, que e exatamente o que se quer.
+    COFRE_CHAVE         = (NovaChave)
+    TOKEN_ENCRYPTION_KEY = (NovaChave)
+
+    # ---- envio para fora: VAZIO -------------------------------------------
+    RESEND_API_KEY      = ''
+})
+
 Write-Host ''
 Write-Host '⚠️ Pagamento e envio para fora ficaram VAZIOS de proposito.' -ForegroundColor Yellow
 Write-Host '   Homologacao nao cobra ninguem e nao manda e-mail para gente de verdade.'
