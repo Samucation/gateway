@@ -618,8 +618,23 @@ PROMOCAO = """
                         submitterParameter: 'quem',
                         parameters: [choice(name: 'ACAO', choices: ['Promover', 'Descartar'],
                                             description: 'Descartar encerra a esteira sem promover.')])
-                    env.QUEM_APROVOU  = r['quem']
-                    env.ACAO_PROMOCAO = r['ACAO']
+                    // 🐞 ACESSO POR PROPRIEDADE, e nao por colchete.
+                    //
+                    // `r['quem']` parece inocente e o sandbox do Jenkins o
+                    // RECUSA:
+                    //
+                    //   RejectedAccessException: Scripts not permitted to use
+                    //   staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods
+                    //
+                    // Indexar mapa com colchete chama `DefaultGroovyMethods.getAt`,
+                    // que nao esta na lista permitida. `r.quem` faz o mesmo por
+                    // um caminho que o sandbox aceita.
+                    //
+                    // ⚠️ Este defeito so aparecia QUANDO ALGUEM CLICAVA em
+                    // promover -- o codigo nunca era executado ate la. O
+                    // pipeline ficou "verde" por dias com a promocao quebrada.
+                    env.QUEM_APROVOU  = r.quem
+                    env.ACAO_PROMOCAO = r.ACAO
                     echo "==> ${env.ACAO_PROMOCAO} decidido por ${env.QUEM_APROVOU}"
                 }
             }
