@@ -118,6 +118,25 @@ PROJETOS = [
          deploys=['sprinklegames-portal'],
          checa=[('sprinklegames.hmg', '/', '200')]),
 
+    # ⚠️ ESCRITO A MAO ATE 22/08/2026, e foi por isso que ele ficou para tras.
+    #
+    # A esteira dele nao tinha teste, nem Sonar, nem portao de qualidade -- e
+    # perdeu DUAS correcoes sistemicas que os gerados receberam no mesmo dia (os
+    # atestados do BuildKit e a guarda de contexto). Cada uma teve que ser
+    # reaplicada a mao, e o esquecimento nao dava erro: dava silencio.
+    #
+    # Aqui ele ganha os doze estagios e toda correcao futura de graca.
+    dict(dir='sigma-midia', sonar='maven', ns='sigma-midia',
+         imagens=[('sigma-midia', '-t {REG}/sigma-midia:$TAG .'),
+                  ('sigma-midia-portal', '-t {REG}/sigma-midia-portal:$TAG ./portal')],
+         deploys=['sigma-midia', 'sigma-midia-portal', 'sigma-midia-imgproxy'],
+         # ⚠️ As duas ultimas sao as que importam: um deploy que abrisse a API ou
+         # o balde por engano passaria em todas as anteriores.
+         checa=[('sigma-midia.hmg', '/', '200'),
+                ('sigma-midia.hmg', '/actuator/health', '200'),
+                ('sigma-midia.hmg', '/api/v1/ativos', '401'),
+                ('sigma-midia-arquivos-hmg.cursodetecnologia.dev.br', '/sigma-midia/', '403')]),
+
     dict(dir='sigma-payments', sonar='maven', ns='sigma-payments',
          imagens=[('sigma-payments', '-t {REG}/sigma-payments:$TAG .'),
                   ('sigma-payments-ops-api', '-f Dockerfile.ops-api -t {REG}/sigma-payments-ops-api:$TAG .'),
