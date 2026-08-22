@@ -82,6 +82,25 @@ $($linhas -join "`n")
     Write-Host ("  {0,-18} {1} aplicado ({2} chaves)" -f $ns, $nome, $dados.Count)
 }
 
+
+# ⚠️ `-Recriar` REGENERA TUDO, e isso tem consequencia.
+#
+# 🐞 Usei `-Recriar` em 22/08/2026 so para acrescentar duas chaves ao
+# sprinklegames, e ele trocou junto a senha do banco do urupix -- que ja tinha
+# subido com a antiga. O Postgres guarda a senha no momento em que INICIALIZA o
+# diretorio de dados; trocar o Secret depois nao muda nada la dentro, e o app
+# passa a nao conseguir entrar no proprio banco.
+#
+# O sintoma engana: o Pod do banco fica `1/1 Running` (ele esta saudavel), e
+# quem falha e a aplicacao, com erro de autenticacao.
+#
+# Em homologacao a saida e simples -- apagar o StatefulSet e o PVC e deixar a
+# esteira recriar. Em producao isso seria perda de dados.
+#
+# ⚠️ Se voce so quer acrescentar UMA chave, edite o molde e rode SEM `-Recriar`:
+# o script pula o que ja existe. Use `-Recriar` sabendo que os bancos de
+# homologacao vao precisar ser recriados junto.
+
 # ---------------------------------------------------------------------------
 # A senha do banco é a MESMA dentro de cada namespace, e gerada aqui.
 # ---------------------------------------------------------------------------
@@ -140,6 +159,24 @@ Aplicar 'sprinklegames' 'sprinklegames-secrets' ([ordered]@{
     DATABASE_URL      = "postgres://sprinkle:$pgSprink@sprinklegames-postgres:5432/sprinklegames"
     JWT_SECRET        = (NovaChave)
     RESEND_API_KEY    = ''
+
+    # 🐞 Faltavam, e o Pod morria em CreateContainerConfigError:
+    #
+    #   couldn't find key SEED_ADMIN_USERNAME in Secret sprinklegames-secrets
+    #
+    # ⚠️ Eu tinha escrito o Secret olhando o `.env` do projeto, e nao o que o
+    # DEPLOYMENT referencia. Sao listas diferentes: o Deployment pede cinco
+    # chaves por `secretKeyRef`, e duas delas nao estao no `.env`.
+    #
+    # A licao: a fonte da verdade sobre "quais chaves o Pod precisa" e o
+    # manifesto, nao o arquivo de ambiente do desenvolvedor.
+    SEED_ADMIN_USERNAME = 'admin-hmg'
+
+    # ⚠️ Senha GERADA, e diferente da de producao. Este ambiente e alcancavel
+    # pela internet (`sprinklegames-hmg.cursodetecnologia.dev.br`); repetir a
+    # senha do admin de producao aqui daria acesso ao painel real a quem
+    # descobrisse a de teste.
+    SEED_ADMIN_PASSWORD = (NovaChave)
 })
 
 Write-Host ''
