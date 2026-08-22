@@ -89,10 +89,6 @@ ingress:
     service: http://127.0.0.1:80
   - hostname: central-ia.cursodetecnologia.dev.br
     service: http://127.0.0.1:80
-  - hostname: central-ia-sandbox.cursodetecnologia.dev.br
-    service: http://192.168.15.9:8030
-    originRequest:
-      httpHostHeader: central-ia-sandbox.cursodetecnologia.dev.br
 
   - hostname: ninjasystem.cursodetecnologia.dev.br
     service: http://127.0.0.1:80
