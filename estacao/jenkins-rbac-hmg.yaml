@@ -39,3 +39,48 @@ subjects:
   - kind: ServiceAccount
     name: jenkins
     namespace: default
+---
+# ===========================================================================
+# 🐞 O `ClusterRole admin` EMBUTIDO NÃO COBRE CRD NENHUM.
+# ===========================================================================
+# Cada namespace de homologação já tem `jenkins-admin -> ClusterRole/admin`, e
+# isso basta para Deployment, Service, Ingress, ConfigMap — tudo que é API
+# nativa do Kubernetes.
+#
+# Mas o Traefik define os recursos dele num grupo PRÓPRIO (`traefik.io`), e o
+# `admin` só alcança grupos conhecidos no momento em que foi escrito. CRD
+# instalada depois fica de fora, a menos que traga a etiqueta de agregação.
+#
+# ⚠️ O estrago aparece tarde e no meio de um deploy que já andou. Em 22/08/2026
+# o `system-api` aplicou 25 objetos com sucesso e morreu no vigésimo sexto:
+#
+#     Error from server (Forbidden): middlewares.traefik.io "cabecalhos-reais"
+#     is forbidden: User "system:serviceaccount:default:jenkins" cannot ...
+#
+# Metade do ambiente ficou atualizada e a outra metade não — que é pior do que
+# não ter aplicado nada, porque o cluster fica num estado que ninguém desenhou.
+#
+# ⚠️ Só `traefik.io`, e não `*`: o ponto do desenho é o token que vive na VM
+# não poder tudo. Se outra CRD entrar depois, ela vem para esta lista de
+# propósito, e não de graça.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: jenkins-traefik-hmg
+rules:
+  - apiGroups: ["traefik.io", "traefik.containo.us"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-traefik-hmg
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: jenkins-traefik-hmg
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: default
