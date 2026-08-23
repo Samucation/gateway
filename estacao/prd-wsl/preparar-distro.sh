@@ -47,22 +47,30 @@ diga "java: $(java -version 2>&1 | head -1)"
 # tentacao e ir mexer em firewall ou em proxy. O problema e SO do resolvedor
 # gerado automaticamente.
 #
-# Por isso o WSL para de gerar o arquivo e ele passa a ser nosso.
-if ! grep -q 'generateResolvConf' /etc/wsl.conf 2>/dev/null; then
-  printf '
-[network]
-generateResolvConf=false
-' >> /etc/wsl.conf
-fi
-if ! grep -q '1.1.1.1' /etc/resolv.conf 2>/dev/null; then
-  rm -f /etc/resolv.conf
-  cat > /etc/resolv.conf <<'DNS'
+# ⚠️ E A CORRECAO E NO systemd-resolved, NAO no arquivo.
+#
+# 🐞 Primeiro eu escrevi `/etc/resolv.conf` a mao. Funcionou ate a distro
+# reiniciar: com systemd ligado, o `systemd-resolved` reassume o arquivo como
+# LINK para o stub dele, e o meu conteudo some sem aviso.
+#
+# O erro seguinte foi outro e igualmente enganoso:
+#
+#   lookup registry-1.docker.io on 127.0.0.53:53: server misbehaving
+#
+# `127.0.0.53` e o stub do proprio resolved -- ou seja, ele estava no caminho e
+# sem para onde encaminhar. Duas mensagens de DNS diferentes, a mesma causa
+# raiz: quem resolve nome aqui e o resolved, e e nele que se configura.
+mkdir -p /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/dns.conf <<'DNS'
 # Fixo de proposito -- ver a explicacao no `preparar-distro.sh`.
-nameserver 1.1.1.1
-nameserver 8.8.8.8
+[Resolve]
+DNS=1.1.1.1 8.8.8.8
+FallbackDNS=9.9.9.9
+DNSStubListener=yes
 DNS
-fi
-diga "dns: $(grep -c nameserver /etc/resolv.conf) servidor(es)"
+systemctl restart systemd-resolved 2>/dev/null || true
+sleep 2
+diga "dns: $(resolvectl status 2>/dev/null | grep -c '1.1.1.1') caminho(s) para 1.1.1.1"
 
 # ---------------------------------------------------------------------------
 # 2. nerdctl + buildkit — o construtor de imagens SEM Docker

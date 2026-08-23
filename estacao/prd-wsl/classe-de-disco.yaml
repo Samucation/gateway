@@ -1,0 +1,48 @@
+# ===========================================================================
+# A CLASSE DE DISCO `microk8s-hostpath` — um apelido, para não reescrever 21
+# arquivos em oito repositórios.
+# ===========================================================================
+#
+# 🐞 O SINTOMA
+#
+#     0/1 nodes are available: pod has unbound immediate
+#     PersistentVolumeClaims. not found
+#
+# Lido rápido, parece falta de espaço ou nó indisponível. Não é: o manifesto
+# pede uma classe de disco chamada `microk8s-hostpath`, que existia na VM
+# (addon `hostpath-storage` do MicroK8s) e **não existe** no k3s — aqui a
+# classe se chama `local-path`.
+#
+# O Pod fica `Pending` para sempre, sem erro no app e sem nada no log dele.
+#
+# ---------------------------------------------------------------------------
+# ⚠️ POR QUE UM APELIDO, E NÃO TROCAR NOS MANIFESTOS
+# ---------------------------------------------------------------------------
+# São 21 arquivos em 8 repositórios. Trocar todos:
+#
+#   - quebraria quem voltasse a implantar em MicroK8s (a VM ainda existe e é
+#     a volta, se esta estação der problema);
+#   - encostaria no `sigma-financeiro`, que é **somente leitura** por regra do
+#     dono, com exceção combinada só para `k8s/` — dá para fazer, mas gasta a
+#     exceção num detalhe de infraestrutura;
+#   - e espalharia por oito repositórios uma decisão que é de UM cluster.
+#
+# O apelido resolve num arquivo, e some no dia em que os manifestos deixarem
+# de citar o nome antigo.
+#
+# ⚠️ `WaitForFirstConsumer`, igual ao `local-path`: com armazenamento local, o
+# volume tem que nascer NO NÓ em que o Pod for parar. Ligar imediato faria o
+# volume nascer num nó e o Pod noutro — hoje só há um nó, mas isso é sorte de
+# topologia, não garantia.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: microk8s-hostpath
+  annotations:
+    # NÃO é a padrão. A padrão continua sendo `local-path`, para que manifesto
+    # novo (que não cite classe nenhuma) use o nome nativo do k3s.
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: rancher.io/local-path
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: false
