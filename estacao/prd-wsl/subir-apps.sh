@@ -20,6 +20,19 @@ TRABALHO=/raiz
 REG=localhost:32000
 
 # projeto | namespace | imagem:argumentos-do-build (separados por ;)
+#
+# ⚠️ Os argumentos sao COPIADOS DO Jenkinsfile de cada projeto, e nao
+# adivinhados a partir da estrutura de pastas.
+#
+# 🐞 Eu tinha escrito `-t .../veltrixa-nfe:TAG ./nfe-service`, supondo que o
+# contexto fosse a pasta do servico. Nao e: o Dockerfile dele referencia
+# `nfe-service/src`, ou seja, o contexto tem que ser a RAIZ do repositorio. O
+# erro sai como
+#
+#   failed to compute cache key: "/nfe-service/src": not found
+#
+# que parece arquivo faltando no repositorio, quando o que esta errado e de
+# ONDE se esta olhando.
 LISTA=$(cat <<'FIM'
 sigma-financeiro|sigma-financeiro|sigma-financeiro:-t REG/sigma-financeiro:TAG .
 sprinklegames-portal|sprinklegames|sprinklegames-portal:-t REG/sprinklegames-portal:TAG .
@@ -28,7 +41,7 @@ opuschat|opuschat|opuschat:-t REG/opuschat:TAG .
 cafe-mobile-erp|plataforma|plataforma:-t REG/plataforma:TAG .
 central-ia|central-ia|central-motor:-t REG/central-motor:TAG .;central-portal:-t REG/central-portal:TAG ./_portal
 sigma-midia|sigma-midia|sigma-midia:-t REG/sigma-midia:TAG .;sigma-midia-portal:-t REG/sigma-midia-portal:TAG ./portal
-system-api|veltrixa|veltrixa-api:-t REG/veltrixa-api:TAG .;veltrixa-frontend:-t REG/veltrixa-frontend:TAG ./veltrixa-frontend;veltrixa-storefront:-t REG/veltrixa-storefront:TAG ./veltrixa-storefront;veltrixa-nfe:-t REG/veltrixa-nfe:TAG ./nfe-service
+system-api|veltrixa|veltrixa-api:-t REG/veltrixa-api:TAG --target runtime .;veltrixa-nfe:-f nfe-service/Dockerfile -t REG/veltrixa-nfe:TAG --target runtime .;veltrixa-frontend:-f veltrixa-frontend/Dockerfile -t REG/veltrixa-frontend:TAG veltrixa-frontend;veltrixa-storefront:-f veltrixa-storefront/Dockerfile -t REG/veltrixa-storefront:TAG veltrixa-storefront
 FIM
 )
 
