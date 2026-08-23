@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Sobe a distro de produção no boot e refaz o encaminhamento de portas.
 
@@ -74,9 +74,28 @@ function Instalar-Tarefa {
 # ---------------------------------------------------------------------------
 function Subir-Distro {
     Diga "subindo a distro '$Distro'..."
-    # Basta um comando: com `systemd=true` no `wsl.conf`, o systemd assume como
-    # PID 1 e a distro permanece de pé.
-    & wsl.exe -d $Distro -u root -- /bin/true 2>&1 | Out-Null
+
+    # -----------------------------------------------------------------------
+    # 🐞 UM COMANDO NAO BASTA — E ESTE DEFEITO CUSTOU HORAS
+    # -----------------------------------------------------------------------
+    # A versao anterior rodava `wsl -d prd -- /bin/true`, no entendimento de
+    # que `systemd=true` mantinha a distro de pe sozinha. NAO mantem: o WSL
+    # encerra a distro poucos segundos depois que o ULTIMO processo iniciado
+    # de fora termina.
+    #
+    # O efeito era cruel de diagnosticar. O k3s leva mais de 30 segundos para
+    # ficar pronto; a distro morria antes disso e reiniciava no comando
+    # seguinte. No log, o k3s aparecia sempre no MESMO ponto
+    # ("Reconciling bootstrap data") e `systemctl` dizia `activating` para
+    # sempre -- com cara de k3s travado, quando o travado era o ambiente
+    # embaixo dele.
+    #
+    # ⚠️ O `sleep infinity` em segundo plano e o que segura. Enquanto ele
+    # viver, a distro vive.
+    Start-Process -FilePath 'wsl.exe' `
+        -ArgumentList '-d', $Distro, '-u', 'root', '--', 'sleep', 'infinity' `
+        -WindowStyle Hidden
+    Start-Sleep -Seconds 3
 
     # Espera o k3s responder de verdade. "A distro subiu" não é a mesma coisa
     # que "o cluster atende" — e é a segunda que importa.
