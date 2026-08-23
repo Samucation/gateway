@@ -1,7 +1,27 @@
 # Produção nesta estação, **fora do Docker**
 
-> Estado: **fundação pronta**. As aplicações ainda não foram migradas — a
-> produção que está no ar hoje continua sendo a de Docker Compose.
+> Estado em 23/08/2026: **cinco sistemas de pé com dados de produção**, o
+> corte ainda **não** feito. Quem atende seus usuários continua sendo a pilha
+> de Docker Compose — nada foi desligado.
+
+## Onde parou
+
+| | |
+|---|---|
+| Distro `prd` | Ubuntu 26.04 + systemd, **no `G:`** (932 GB livres) |
+| k3s | v1.36.3, Traefik, registro em `localhost:32000` |
+| Construção | `nerdctl` + `buildkit` no containerd do k3s — sem Docker |
+| Jenkins | 2.568.2, 84 plugins, 10 jobs, painel, tema, contas |
+| Sistemas no k3s | `sigma-financeiro`, `sprinklegames`, `urupix`, `opuschat`, `plataforma` — todos **200** pelo ingress |
+| Bancos migrados | 6, conferidos **linha a linha, tabela a tabela** |
+| Faltando | `central-ia`, `sigma-midia`, `system-api` (construindo) |
+| Corte | pronto em `CORTAR-PARA-K3S.ps1`, exige Administrador |
+
+⚠️ **O corte não foi feito de propósito.** Ele exige elevação em três pontos
+de sistema (serviço do túnel, `netsh portproxy`, tarefa de boot), e sem
+alguém para aceitar a janela do Windows o script pararia no meio — com o
+túnel apontando para um lado e o serviço no outro. Meio-caminho é o pior
+estado de uma virada.
 
 ---
 
