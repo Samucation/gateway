@@ -1,0 +1,76 @@
+# ===========================================================================
+# O REGISTRO DE IMAGENS da producao local
+# ===========================================================================
+# Os overlays `prd` de todos os projetos referenciam `localhost:32000/<app>`.
+# Esse endereco vinha do addon `registry` do MicroK8s, na VM. Aqui ele precisa
+# existir com o MESMO nome e a MESMA porta -- senao seria preciso reescrever a
+# imagem em nove repositorios, e a esteira passaria a publicar num lugar e o
+# cluster a procurar em outro.
+#
+# ⚠️ `hostPort` de proposito, e nao NodePort. De dentro da distro, `localhost`
+# tem que ser o registro; um NodePort responderia no IP do no, e a linha
+# `localhost:32000` dos manifestos deixaria de resolver.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registro
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registro-dados
+  namespace: registro
+spec:
+  accessModes: [ReadWriteOnce]
+  # ⚠️ 40Gi porque imagem de aplicacao nao e pequena: a VM guardava 23 GB so de
+  # imagem, e um registro cheio para de aceitar `push` com um erro que parece
+  # problema de rede.
+  resources:
+    requests:
+      storage: 40Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registro
+  namespace: registro
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: registro }
+  template:
+    metadata:
+      labels: { app: registro }
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+              hostPort: 32000
+          env:
+            # Deixa apagar imagem antiga: sem isto o unico jeito de liberar
+            # espaco seria apagar o volume inteiro.
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: dados
+              mountPath: /var/lib/registry
+          resources:
+            requests: { memory: "128Mi", cpu: "50m" }
+            limits:   { memory: "1Gi",   cpu: "1000m" }
+      volumes:
+        - name: dados
+          persistentVolumeClaim:
+            claimName: registro-dados
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registro
+  namespace: registro
+spec:
+  selector: { app: registro }
+  ports:
+    - port: 5000
+      targetPort: 5000
