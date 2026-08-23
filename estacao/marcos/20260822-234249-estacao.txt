@@ -1,0 +1,5 @@
+﻿# marco da virada — 20260822-234249 — destino: estacao
+
+liveflow-db/liveflow: doacoes=58 ultima=2026-08-21 06:19:54.071
+liveflow-db/liveflow: usuarios=14
+sigma-db/sigma_financeiro: cobrancas=24 ultima=2026-08-21 06:19:56.362

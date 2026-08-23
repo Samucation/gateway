@@ -1534,7 +1534,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               }
           ],
         plugins:
@@ -1656,7 +1656,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               }
           ],
         plugins:
@@ -1778,7 +1778,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               }
           ],
         plugins:
@@ -1889,7 +1889,7 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 methods: [ GET ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               }
           ],
         plugins:
@@ -2007,7 +2007,7 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 plugins: [ { name: rate-limiting, config: { minute: 60, policy: local, limit_by: ip } } ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               },
 
             {
@@ -2019,7 +2019,7 @@ services:
                   [
                     { name: rate-limiting, config: { minute: 300, policy: local, limit_by: ip } }
                   ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               },
 
             {
@@ -2034,7 +2034,7 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ central.interno ]
+                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
               }
           ],
         plugins:
