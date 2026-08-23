@@ -1,0 +1,42 @@
+# Os plugins que a nossa configuracao EXIGE.
+#
+# ⚠️ Esta lista nao e "o que veio junto": e o que os scripts de
+# `init.groovy.d` importam e o que os Jenkinsfile chamam. Numa maquina nova o
+# Jenkins sobe sem plugin nenhum, os scripts falham com
+# `unable to resolve class` e o resultado e um Jenkins VAZIO -- de pe, sem
+# nenhum job, o que engana quem so olha se o servico subiu.
+#
+# O gerenciador resolve as dependencias sozinho; aqui ficam so as raizes.
+
+# --- esteira ---------------------------------------------------------------
+workflow-aggregator
+workflow-multibranch
+pipeline-stage-view
+
+# ⚠️ `pipeline-stage-view` NAO e enfeite de tela: e ele que serve o `wfapi`,
+# de onde o nosso painel le as fases, a fase atual e a PERGUNTA PENDENTE do
+# portao de producao. Sem ele o painel mostra cartao sem fase nenhuma.
+
+# --- codigo ----------------------------------------------------------------
+git
+github-branch-source
+
+# --- credenciais -----------------------------------------------------------
+credentials
+credentials-binding
+plain-credentials
+ssh-credentials
+
+# --- pastas e visoes -------------------------------------------------------
+cloudbees-folder
+
+# --- passos usados nos Jenkinsfile ------------------------------------------
+timestamper
+ws-cleanup
+
+# --- aparencia -------------------------------------------------------------
+# O tema cinza e injetado por `simple-theme-plugin`; o escuro vem do
+# `theme-manager` com o `dark-theme`.
+theme-manager
+dark-theme
+simple-theme-plugin
