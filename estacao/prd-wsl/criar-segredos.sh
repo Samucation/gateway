@@ -78,6 +78,23 @@ ler_env() {
   local arquivo="$1" chave="$2" linha
   linha=$(grep -m1 -E "^[[:space:]]*${chave}=" "$arquivo" 2>/dev/null) || return 1
   linha="${linha#*=}"
+
+  # 🐞 O RETORNO DE CARRO VEM PRIMEIRO, E POR UM MOTIVO CARO.
+  #
+  # Os `.env` foram escritos no Windows, entao terminam em CRLF. O `\r` fica
+  # GRUDADO no fim do valor, e ai a retirada de aspas abaixo nao acha aspa
+  # nenhuma -- o ultimo caractere e o `\r`, nao a `"`.
+  #
+  # O estrago foi este, no urupix:
+  #
+  #   Datasource "db": PostgreSQL database "liveflow%22" ...
+  #   ERROR: unterminated quoted identifier at or near ""liveflow"""
+  #
+  # A aspa sobreviveu ate dentro do nome do banco, virou `%22` na URL, e o
+  # Prisma reclamou de identificador nao terminado. Nada na mensagem aponta
+  # para "o arquivo tem CRLF".
+  linha="${linha%$'\r'}"
+
   # tira aspas das pontas, se houver
   linha="${linha%\"}"; linha="${linha#\"}"
   linha="${linha%\'}"; linha="${linha#\'}"
@@ -105,8 +122,24 @@ type: Opaque
 stringData:"
 
   faltando=""
+  vazias=""
   for k in $chaves; do
     v=$(ler_env "$env_arq" "$k") || v=""
+
+    # ⚠️ DECLARADA-E-VAZIA e diferente de AUSENTE, e confundir as duas erra
+    # para os dois lados.
+    #
+    # `GOOGLE_CLIENT_ID=` no `.env` quer dizer "esta funcionalidade nao esta
+    # configurada" -- e a producao de hoje roda assim. Tratar como falta
+    # deixaria a chave fora do Secret, e o Pod nao subiria
+    # (`CreateContainerConfigError`).
+    #
+    # Ja uma chave que NAO aparece no arquivo e lacuna de verdade, e essa
+    # continua sendo reportada.
+    #
+    # 🐞 Ate a correcao do CRLF as duas eram indistinguiveis: o `\r` sozinho
+    # fazia um valor vazio parecer preenchido.
+    if grep -qE "^[[:space:]]*${k}=" "$env_arq" 2>/dev/null; then declarada=1; else declarada=0; fi
 
     # -----------------------------------------------------------------------
     # APELIDOS — a mesma coisa com nome diferente dos dois lados
@@ -209,9 +242,10 @@ stringData:"
     # ele fica em `CreateContainerConfigError`, que nao diz qual chave falta.
     # Vazia, o container sobe e a aplicacao trata a ausencia como ela ja
     # trataria no compose.
-    if [ -z "$v" ] && [ "${opcional:-0}" != "1" ]; then
+    if [ -z "$v" ] && [ "${opcional:-0}" != "1" ] && [ "$declarada" != "1" ]; then
       faltando="$faltando $k"; opcional=0; continue
     fi
+    [ -z "$v" ] && [ "$declarada" = "1" ] && vazias="$vazias $k"
     opcional=0
 
     # ⚠️ A reescrita do host do banco. `localhost`/`127.0.0.1` viram o Service.
@@ -231,7 +265,11 @@ stringData:"
   done
 
   if [ -n "$faltando" ]; then
-    echo "  $proj: ⚠️ faltam no .env:$faltando"
+    echo "  $proj: ⚠️ AUSENTES no .env:$faltando"
+  fi
+  if [ -n "$vazias" ]; then
+    # Informativo, nao alarme: sao funcionalidades declaradas e nao ligadas.
+    echo "  $proj: (declaradas vazias:$vazias )"
   fi
 
   if printf '%s\n' "$corpo" | kubectl apply -f - >/dev/null 2>&1; then
