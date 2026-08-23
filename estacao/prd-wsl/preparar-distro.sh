@@ -31,6 +31,40 @@ apt-get install -y -qq \
 diga "java: $(java -version 2>&1 | head -1)"
 
 # ---------------------------------------------------------------------------
+# 1b. DNS fixo — o buildkit nao se da bem com o resolvedor do WSL
+# ---------------------------------------------------------------------------
+#
+# 🐞 O `docker build` morria assim, com a rede da distro FUNCIONANDO:
+#
+#   failed to fetch anonymous token: dial tcp: lookup auth.docker.io
+#   on 10.255.255.254:53: no such host
+#
+# `curl` para o mesmo endereco respondia normalmente, e `getent hosts` resolvia
+# -- devolvendo IPv6. O resolvedor que o WSL instala (10.255.255.254) e um
+# encaminhador para o Windows, e o buildkit tropeça nele.
+#
+# ⚠️ O engano aqui e caro: a mensagem culpa o DNS, a rede esta boa, e a
+# tentacao e ir mexer em firewall ou em proxy. O problema e SO do resolvedor
+# gerado automaticamente.
+#
+# Por isso o WSL para de gerar o arquivo e ele passa a ser nosso.
+if ! grep -q 'generateResolvConf' /etc/wsl.conf 2>/dev/null; then
+  printf '
+[network]
+generateResolvConf=false
+' >> /etc/wsl.conf
+fi
+if ! grep -q '1.1.1.1' /etc/resolv.conf 2>/dev/null; then
+  rm -f /etc/resolv.conf
+  cat > /etc/resolv.conf <<'DNS'
+# Fixo de proposito -- ver a explicacao no `preparar-distro.sh`.
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+DNS
+fi
+diga "dns: $(grep -c nameserver /etc/resolv.conf) servidor(es)"
+
+# ---------------------------------------------------------------------------
 # 2. nerdctl + buildkit — o construtor de imagens SEM Docker
 # ---------------------------------------------------------------------------
 #
