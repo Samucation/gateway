@@ -110,8 +110,18 @@ function Subir-Distro {
 
 # ---------------------------------------------------------------------------
 function Refazer-Portas {
-    $ip = (& wsl.exe -d $Distro -u root -- bash -c "ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1" 2>$null)
-    $ip = "$ip".Trim() -replace "`0", ''
+    # 🐞 `hostname -I`, e nao `ip addr | awk`.
+    #
+    # O `$4` do awk e variavel para o PowerShell tambem: ele o trocava por
+    # VAZIO antes de mandar o comando, e o awk reclamava `{print \}`. O script
+    # concluia "NAO descobri o IP" com a rede perfeita.
+    #
+    # ⚠️ Cifrao dentro de string do PowerShell que vira comando de shell e
+    # sempre suspeito. `hostname -I` nao usa nenhum.
+    $ip = (& wsl.exe -d $Distro -u root -- hostname -I 2>$null)
+    $ip = ("$ip" -replace "`0", '' -replace "`r", '').Trim()
+    # A primeira e a da eth0; as demais sao redes internas do cluster.
+    if ($ip -match '^(\d+\.\d+\.\d+\.\d+)') { $ip = $Matches[1] }
     if (-not ($ip -match '^\d+\.\d+\.\d+\.\d+$')) {
         Diga "NAO descobri o IP da distro (veio '$ip')"
         return $false
@@ -125,7 +135,29 @@ function Refazer-Portas {
         & netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>&1 | Out-Null
         & netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p `
             connectaddress=$ip connectport=$p 2>&1 | Out-Null
-        Diga "127.0.0.1:$p -> ${ip}:$p"
+    }
+
+    # 🐞 CONFERE que o mapeamento EXISTE, em vez de anunciar que criou.
+    #
+    # `netsh portproxy add` exige Administrador e, sem ele, falha em SILENCIO
+    # -- ainda mais com a saida mandada para o vazio. A versao anterior
+    # imprimia "127.0.0.1:8050 -> 172.29.89.49:8050" com a tabela vazia.
+    #
+    # ⚠️ Guarda que anuncia sucesso sem medir e pior que guarda nenhuma: numa
+    # tarefa de boot, ela transformaria "a producao nao esta acessivel" em
+    # "tudo certo" no log.
+    $tabela = (& netsh interface portproxy show v4tov4 2>&1 | Out-String)
+    $faltando = @()
+    foreach ($p in $Portas) {
+        if ($tabela -match "127\.0\.0\.1\s+$p\s+$([regex]::Escape($ip))\s+$p") {
+            Diga "127.0.0.1:$p -> ${ip}:$p"
+        } else {
+            $faltando += $p
+        }
+    }
+    if ($faltando.Count) {
+        Diga "⚠️ NAO consegui mapear: $($faltando -join ', ') (precisa de Administrador)"
+        return $false
     }
     return $true
 }
