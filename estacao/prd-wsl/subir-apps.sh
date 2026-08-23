@@ -28,7 +28,7 @@ opuschat|opuschat|opuschat:-t REG/opuschat:TAG .
 cafe-mobile-erp|plataforma|plataforma:-t REG/plataforma:TAG .
 central-ia|central-ia|central-motor:-t REG/central-motor:TAG .;central-portal:-t REG/central-portal:TAG ./_portal
 sigma-midia|sigma-midia|sigma-midia:-t REG/sigma-midia:TAG .;sigma-midia-portal:-t REG/sigma-midia-portal:TAG ./portal
-system-api|veltrixa|veltrixa-api:-t REG/veltrixa-api:TAG .;veltrixa-frontend:-t REG/veltrixa-frontend:TAG ./frontend;veltrixa-storefront:-t REG/veltrixa-storefront:TAG ./storefront;veltrixa-nfe:-t REG/veltrixa-nfe:TAG ./nfe-service
+system-api|veltrixa|veltrixa-api:-t REG/veltrixa-api:TAG .;veltrixa-frontend:-t REG/veltrixa-frontend:TAG ./veltrixa-frontend;veltrixa-storefront:-t REG/veltrixa-storefront:TAG ./veltrixa-storefront;veltrixa-nfe:-t REG/veltrixa-nfe:TAG ./nfe-service
 FIM
 )
 
