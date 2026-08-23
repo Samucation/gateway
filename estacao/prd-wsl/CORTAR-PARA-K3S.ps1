@@ -142,18 +142,32 @@ if ($Para -eq 'k3s') {
     }
     Diga "127.0.0.1:80 e :8050 -> $ip"
 
-    Diga '== 3. parando a producao do Docker =='
-    # ⚠️ So os conteineres de APLICACAO. O Docker Desktop continua de pe --
-    # ele e o ambiente de desenvolvimento, e derruba-lo aqui misturaria duas
-    # decisoes diferentes numa so.
-    & docker compose -f "$PSScriptRoot\..\..\docker-compose.yml" down 2>&1 | Out-Null
+    Diga '== 3. congelando a origem =='
+    # ⚠️ PARAR ANTES DE COPIAR, e nao depois.
+    #
+    # 🐞 Enquanto o Docker atende, as tabelas de auditoria crescem: cada
+    # conferencia acusava `ApiAccessLog` e `msg_audit` com uma linha a mais no
+    # lado antigo. Nao e perda -- e que o dump e um retrato, e o original
+    # continua se mexendo.
+    #
+    # A copia definitiva so vale com a origem congelada. Por isso os apps
+    # param aqui, ANTES da ultima passada de dados.
     & docker stop gateway-kong 2>&1 | Out-Null
-    Diga 'kong do docker parado (libera a 8050)'
+    foreach ($c in (& docker ps --format '{{.Names}}' 2>$null)) {
+        # Os BANCOS ficam de pe: e deles que a copia final sai.
+        if ($c -match 'postgres|db$|-db|redis|minio|kafka|redpanda') { continue }
+        & docker stop $c 2>&1 | Out-Null
+    }
+    Diga 'aplicacoes do docker paradas (bancos seguem de pe para a copia)'
 
-    Diga '== 4. tarefa de inicializacao =='
+    Diga '== 4. copia final dos dados, com a origem parada =='
+    & bash "$PSScriptRoot/migrar-dados.sh" 2>&1 | Select-String '✅|❌|⚠️|problema' |
+        ForEach-Object { Diga "   $_" }
+
+    Diga '== 5. tarefa de inicializacao =='
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\subir-no-boot.ps1" -Instalar
 
-    Diga '== 5. conferindo o que o usuario ve =='
+    Diga '== 6. conferindo o que o usuario ve =='
     Start-Sleep -Seconds 20
     $fora = MedirDominios
     if ($fora.Count -eq 0) {
@@ -174,9 +188,13 @@ if ($Para -eq 'docker') {
         & netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>&1 | Out-Null
     }
     Diga 'encaminhamento de portas removido'
+    # ⚠️ `start` de todos os parados, e nao `compose up` de um arquivo so: os
+    # conteineres vem de composes diferentes, espalhados pelos repositorios.
     & docker start gateway-kong 2>&1 | Out-Null
-    & docker compose -f "$PSScriptRoot\..\..\docker-compose.yml" up -d 2>&1 | Out-Null
-    Diga 'pilha do docker de volta'
+    foreach ($c in (& docker ps -a --filter status=exited --format '{{.Names}}' 2>$null)) {
+        & docker start $c 2>&1 | Out-Null
+    }
+    Diga 'conteineres do docker religados'
     Start-Sleep -Seconds 25
     $fora = MedirDominios
     Diga "dominios fora: $($fora.Count)"
