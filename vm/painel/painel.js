@@ -61,6 +61,15 @@ async function postar(caminho) {
   if (!r.ok && r.status !== 302) throw new Error('devolveu ' + r.status);
 }
 
+// ⚠️ O log e texto de FORA -- vem de compilador, de teste, de resposta de API.
+// Jogar direto em `innerHTML` deixaria qualquer `<` do log virar marcacao, e
+// uma mensagem de erro com HTML dentro quebraria o cartao (ou pior).
+function escapar(t) {
+  const d = document.createElement('div');
+  d.textContent = t;
+  return d.innerHTML;
+}
+
 function classeDe(resultado, rodando, pendente) {
   // ⚠️ A espera por aprovacao vem ANTES de tudo: e o unico estado em que a
   // esteira depende de uma PESSOA, e precisa saltar aos olhos.
@@ -208,6 +217,60 @@ async function responder(base, id, acao) {
   if (!r.ok && r.status !== 302) throw new Error('devolveu ' + r.status);
 }
 
+// ===========================================================================
+// A ULTIMA LINHA VIVA DO LOG — onde DENTRO da fase a esteira esta
+// ===========================================================================
+// Saber que ela esta em "Testes + cobertura" nao responde a pergunta de quem
+// espera: e o quinto teste ou o quingentesimo? Travou? Esta baixando imagem?
+//
+// ⚠️ Isto NAO mexe na esteira. Nenhum passo novo, nenhum `echo` plantado: le o
+// console que o Jenkins ja grava. Esteira e para construir; instrumentar a
+// esteira para alimentar um painel deixaria o painel ditando o formato do log.
+//
+// 🐞 E o log NAO e baixado inteiro. Uma execucao do live-flow passa de 15 mil
+// linhas; puxar isso a cada 10 segundos, por projeto, afogaria a mesma VM que
+// roda producao -- ja derrubei 20 dominios por carga uma vez.
+//
+// O truque: `progressiveText` com um `start` maior que o log devolve CORPO
+// VAZIO e o cabecalho `X-Text-Size` com o tamanho real. Uma requisicao de
+// alguns bytes descobre onde o log termina; a segunda pede so os ultimos 3 KB.
+async function tailDoLog(base) {
+  const sonda = await fetch(RAIZ + base + 'lastBuild/logText/progressiveText?start=999999999',
+                            { credentials: 'same-origin' });
+  const tam = Number(sonda.headers.get('X-Text-Size') || 0);
+  if (!tam) return null;
+
+  const de = Math.max(0, tam - 3000);
+  const r = await fetch(RAIZ + base + 'lastBuild/logText/progressiveText?start=' + de,
+                        { credentials: 'same-origin' });
+  return ultimaLinhaUtil(await r.text());
+}
+
+// ⚠️ O console do Jenkins nao e texto puro. Ele carrega ANOTACOES em sequencia
+// de escape (`ESC[8m ha:////... ESC[0m`) que somem no navegador dele e, cruas,
+// aparecem como um paredao de base64 no meio da frase.
+const ESCAPES = /\x1b\[[0-9;]*m/g;
+const ANOTACAO = /ha:\/\/\/\/[A-Za-z0-9+/=]+/g;
+const CARIMBO = /^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z?\]\s*/;
+
+function ultimaLinhaUtil(bruto) {
+  const linhas = bruto
+    .replace(ESCAPES, '')
+    .replace(ANOTACAO, '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(CARIMBO, '').trim())
+    // `[Pipeline]` e contabilidade interna do Jenkins, nao progresso do
+    // trabalho. Deixar passar faria o painel repetir "[Pipeline] }" por
+    // minutos enquanto os testes rodam logo abaixo.
+    .filter((l) => l && !l.startsWith('[Pipeline]'));
+
+  if (!linhas.length) return null;
+  const ultima = linhas[linhas.length - 1];
+  // ⚠️ O primeiro pedaco costuma vir cortado no meio (comecamos a ler no byte
+  // 3000 antes do fim), entao so a ULTIMA linha completa e confiavel.
+  return ultima.length > 120 ? ultima.slice(0, 118) + '…' : ultima;
+}
+
 async function carregar() {
   const sub = document.getElementById('sub');
   let jobs;
@@ -229,7 +292,7 @@ async function carregar() {
   // Em paralelo: dez projetos em série levariam dez idas ao servidor.
   const dados = await Promise.all(jobs.map(async (j) => {
     const base = new URL(j.url).pathname.slice(1);
-    const fora = { job: j, base, ultima: null, etapas: [], historico: [], totalEsperado: 0, pendente: null };
+    const fora = { job: j, base, ultima: null, etapas: [], historico: [], totalEsperado: 0, pendente: null, linhaViva: null };
     try {
       // `estimatedDuration` e o que o Jenkins calcula a partir das execucoes
       // anteriores. E dele que sai a porcentagem enquanto a esteira roda.
@@ -268,6 +331,12 @@ async function carregar() {
       const h = await pegar(base + 'api/json?tree=builds[result,building]{0,' + QUANTAS + '}');
       fora.historico = h.builds || [];
     } catch (e) { /* sem histórico */ }
+    try {
+      // So para quem esta DE PE: numa esteira parada a ultima linha nao muda, e
+      // seriam duas idas ao servidor por projeto a cada 10 segundos para
+      // reexibir a mesma frase.
+      if (fora.ultima && fora.ultima.building) fora.linhaViva = await tailDoLog(base);
+    } catch (e) { /* sem log ainda, ou log rotacionado */ }
     return fora;
   }));
 
@@ -372,7 +441,10 @@ async function carregar() {
       '</div>' +
       '<div class="estado ' + cls + '">' + textoDe(resultado, rodando, d.pendente) + '</div>' +
       (bolinhas ? '<div class="fases">' + bolinhas + '</div>' : '') +
-      progresso;
+      progresso +
+      // A linha viva vai por ULTIMO, embaixo de tudo: e o detalhe mais fino do
+      // cartao, e quem so quer o estado geral nao precisa ler ate aqui.
+      (d.linhaViva ? '<div class="viva" title="ultima linha do log">' + escapar(d.linhaViva) + '</div>' : '');
 
     const acoes = document.createElement('div');
     acoes.className = 'acoes';
@@ -393,6 +465,20 @@ async function carregar() {
         bReenviar.disabled = false;
       }
     };
+
+    // -----------------------------------------------------------------------
+    // VER O LOG — em aba NOVA, de proposito.
+    // -----------------------------------------------------------------------
+    // ⚠️ Abrir no lugar do painel faria perder o mural inteiro para olhar UMA
+    // esteira, e voltar significaria recarregar as dez. Quem investiga um erro
+    // quase sempre quer o log ao LADO do painel, nao no lugar dele.
+    const bLog = document.createElement('a');
+    bLog.textContent = '📄 ver o log';
+    bLog.href = RAIZ + d.base + 'lastBuild/console';
+    bLog.target = '_blank';
+    // `noopener`: a aba nova nao ganha referencia a esta pela `window.opener`.
+    bLog.rel = 'noopener';
+    bLog.className = 'botao' + (cls === 'erro' ? ' destaque' : '');
 
     const bParar = document.createElement('button');
     bParar.textContent = '■ parar';
@@ -470,6 +556,9 @@ async function carregar() {
       acoes.appendChild(bReenviar);
       acoes.appendChild(bParar);
     }
+    // O log fica SEMPRE disponivel, aguardando aprovacao ou nao: e o que
+    // responde "o que ela fez ate aqui?" antes de decidir promover.
+    acoes.appendChild(bLog);
     el.appendChild(acoes);
     novaGrade.appendChild(el);
 

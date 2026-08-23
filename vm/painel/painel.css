@@ -187,3 +187,39 @@ button.perigo:hover:not(:disabled) { border-color: var(--erro); color: var(--err
   font-weight: 640;
 }
 .acoes button.promover:hover:not(:disabled) { filter: brightness(1.12); }
+
+/* ---------------------------------------------------------------------------
+   A LINHA VIVA — a ultima linha do log da esteira que esta rodando.
+   ---------------------------------------------------------------------------
+   ⚠️ Monoespacada e menor de proposito: e saida de maquina, nao texto da tela.
+   Misturar com a fonte do painel faria parecer mensagem nossa, e ela nao e --
+   e o que o compilador, o teste ou o `kubectl` acabou de dizer.
+
+   Uma linha so, com reticencias. Sem `nowrap` uma saida longa empurraria o
+   cartao e a grade inteira dancaria a cada leitura.
+   --------------------------------------------------------------------------- */
+.viva {
+  margin-top: 7px;
+  padding: 5px 8px;
+  background: #1b2027;
+  border-radius: 5px;
+  font: 11px/1.45 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #9aa6b2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* O "ver o log" e uma ANCORA, nao um botao -- precisa abrir em aba nova, e
+   `window.open` de dentro de um `onclick` e o que os bloqueadores de pop-up
+   barram. Aqui ela recebe a aparencia dos botoes ao lado. */
+.acoes .botao {
+  font: inherit; font-size: 12px;
+  background: var(--cartao); color: var(--texto);
+  border: 1px solid var(--linha); border-radius: 7px;
+  padding: 4px 11px; text-decoration: none;
+  display: inline-flex; align-items: center;
+}
+.acoes .botao:hover { border-color: var(--fraco); }
+/* Na esteira que quebrou, o log deixa de ser opcao e vira o proximo passo. */
+.acoes .botao.destaque { border-color: var(--erro); color: var(--erro); }
