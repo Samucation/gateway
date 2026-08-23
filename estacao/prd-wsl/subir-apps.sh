@@ -68,6 +68,23 @@ while IFS='|' read -r proj ns imagens <&3; do
     git clone -q "$REPOS/$proj" "$destino" || { echo "  ERRO: nao clonei $proj"; falhas=$((falhas+1)); continue; }
   fi
 
+  # ⚠️ O `central-ia` constroi DOIS repositorios.
+  #
+  # O portal mora em `central-ia-portal`, repositorio separado, mas os dois
+  # sao implantados pelo MESMO overlay (`central-ia/k8s`). Dois pipelines
+  # editando o mesmo arquivo brigariam -- o ultimo a aplicar apagaria a tag do
+  # outro. Por isso a esteira busca o portal e constroi os dois juntos, e aqui
+  # tem que ser igual.
+  #
+  # 🐞 Sem esta copia o build morre com `lstat /raiz/central-ia/_portal/
+  # Containerfile: no such file or directory` -- que parece Dockerfile
+  # faltando no repo, quando o que falta e o repo INTEIRO ao lado.
+  if [ "$proj" = "central-ia" ] && [ -d "$REPOS/central-ia-portal" ]; then
+    rm -rf "$destino/_portal"
+    git clone -q "$REPOS/central-ia-portal" "$destino/_portal" 2>/dev/null \
+      || echo "  ⚠️ nao consegui trazer o central-ia-portal"
+  fi
+
   tag=$(git -C "$destino" rev-parse --short=12 HEAD)
   echo "  tag: $tag"
 
