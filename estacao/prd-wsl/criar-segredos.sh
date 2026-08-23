@@ -30,8 +30,45 @@ falhas=0
 # projeto | namespace | nome-do-secret | chaves (espaco) | servico-do-banco
 LISTA=$(cat <<'FIM'
 sigma-financeiro|sigma-financeiro|sigma-financeiro-secrets|AUTH_SECRET DATABASE_URL DATABASE_URL_SANDBOX GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET POSTGRES_PASSWORD SIGMA_WEBHOOK_TOKEN TOKEN_ENCRYPTION_KEY|sigma-db
+live-flow|urupix|urupix-secrets|AUTH_SECRET DATABASE_URL INTERNAL_CRON_SECRET POSTGRES_PASSWORD TOKEN_ENCRYPTION_KEY|urupix-postgres
+sprinklegames-portal|sprinklegames|sprinklegames-secrets|DATABASE_URL JWT_SECRET POSTGRES_PASSWORD RESEND_API_KEY SEED_ADMIN_PASSWORD SEED_ADMIN_USERNAME|sprinklegames-postgres
+opuschat|opuschat|opuschat-secrets|ATENDIMENTO_WEBHOOK_SECRET CENTRAL_CHAVE COFRE_CHAVE DATABASE_URL JWT_SECRET PLATFORM_ADMIN_TOTP POSTGRES_PASSWORD RESEND_API_KEY|opuschat-postgres
+cafe-mobile-erp|plataforma|plataforma-secrets|ATENDIMENTO_WEBHOOK_SECRET CENTRAL_CHAVE COFRE_CHAVE DATABASE_URL JWT_SECRET PLATFORM_ADMIN_TOTP POSTGRES_PASSWORD RESEND_API_KEY|plataforma-postgres
+central-ia|central-ia|central-ia-secrets|DATABASE_URL_MOTOR POSTGRES_PASSWORD|central-postgres-motor
+sigma-midia|sigma-midia|sigma-midia-secrets|MC_HOST_MINIO MIDIA_ADMIN_EMAIL MIDIA_ADMIN_SENHA MIDIA_DB_SENHA MIDIA_IMG_CHAVE MIDIA_IMG_SAL MIDIA_S3_APP_SENHA MIDIA_S3_APP_USER MINIO_ROOT_PASSWORD MINIO_ROOT_USER|sigma-midia-postgres
+system-api|veltrixa|veltrixa-secrets|KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_ADMIN_USER KEYCLOAK_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_SEED_ADMIN_PASSWORD NFE_POSTGRES_PASSWORD NFE_VAULT_KEK POSTGRES_PASSWORD|veltrixa-postgres
 FIM
 )
+
+# ---------------------------------------------------------------------------
+# O COFRE — segredos que NAO vêm de lugar nenhum e precisam existir
+# ---------------------------------------------------------------------------
+#
+# Alguns valores nao estao no `.env` porque o `docker-compose` tinha um padrao
+# embutido para eles. Copiar esse padrao seria levar a senha de exemplo do
+# repositorio para dentro da producao nova.
+#
+# ⚠️ E o valor precisa ser ESTAVEL entre execucoes: sortear de novo a cada
+# rodada trocaria a senha do banco embaixo de um Postgres que ja tem dados, e
+# o app pararia de conectar sem nada ter mudado no codigo.
+#
+# Por isso ele e guardado -- fora do git, modo 600, na propria distro.
+COFRE=/var/lib/prd-segredos
+mkdir -p "$COFRE" && chmod 700 "$COFRE"
+
+sortear_e_guardar() {
+  local proj="$1" chave="$2" arq="$COFRE/$proj.env" valor
+  if [ -f "$arq" ]; then
+    valor=$(grep -m1 -E "^${chave}=" "$arq" 2>/dev/null) || valor=""
+    if [ -n "$valor" ]; then printf '%s' "${valor#*=}"; return 0; fi
+  fi
+  # 24 caracteres de /dev/urandom, so alfanumericos: senha longa que atravessa
+  # URL, YAML e linha de comando sem precisar de escape.
+  valor=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+  printf '%s=%s\n' "$chave" "$valor" >> "$arq"
+  chmod 600 "$arq"
+  printf '%s' "$valor"
+}
 
 # Le UMA variavel do .env sem executar o arquivo.
 #
@@ -71,6 +108,76 @@ stringData:"
   for k in $chaves; do
     v=$(ler_env "$env_arq" "$k") || v=""
 
+    # -----------------------------------------------------------------------
+    # APELIDOS — a mesma coisa com nome diferente dos dois lados
+    # -----------------------------------------------------------------------
+    #
+    # ⚠️ O nome no manifesto do Kubernetes nem sempre e o nome no `.env`. O
+    # `.env` nasceu para o `docker-compose`, e o compose renomeia no caminho
+    # (`MINIO_ROOT_USER: ${MIDIA_S3_CHAVE:-midia}`).
+    #
+    # 🐞 Sem esta tabela, a chave sai VAZIA no Secret e o Pod sobe assim
+    # mesmo -- com credencial em branco. No MinIO isso e um balde que recusa
+    # tudo; no Keycloak, um administrador que nao entra. Nos dois casos o
+    # sintoma aparece longe: "acesso negado", e nao "faltou configurar".
+    if [ -z "$v" ]; then
+      case "$k" in
+        MINIO_ROOT_USER)
+          v=$(ler_env "$env_arq" MIDIA_S3_CHAVE) || v=""
+          # Mesmo caso do `MIDIA_DB_SENHA`: ausente no `.env`, o compose cai no
+          # padrao `midia`. Aqui vira um nome proprio, guardado no cofre.
+          [ -z "$v" ] && v=$(sortear_e_guardar "$proj" MINIO_ROOT_USER) ;;
+        MINIO_ROOT_PASSWORD)
+          v=$(ler_env "$env_arq" MIDIA_S3_SEGREDO) || v=""
+          [ -z "$v" ] && v=$(sortear_e_guardar "$proj" MINIO_ROOT_PASSWORD) ;;
+        KEYCLOAK_ADMIN_USER) v=$(ler_env "$env_arq" KEYCLOAK_ADMIN)   || v="" ;;
+        KEYCLOAK_SEED_ADMIN_PASSWORD)
+          v=$(ler_env "$env_arq" KEYCLOAK_ADMIN_PASSWORD) || v="" ;;
+        MIDIA_DB_SENHA)
+          # ⚠️ Deliberadamente NAO herda o padrao do compose.
+          #
+          # 🔴 ACHADO: o `.env` do sigma-midia nao define `MIDIA_DB_SENHA` nem
+          # `MIDIA_S3_CHAVE`/`MIDIA_S3_SEGREDO`. O compose entao cai nos
+          # padroes dele -- `midia-local` e `midia-segredo-local`. Ou seja: a
+          # producao de hoje roda o Postgres e o MinIO com a SENHA DE EXEMPLO,
+          # a mesma que esta no repositorio publico.
+          #
+          # Copiar isso para ca perpetuaria o problema. Aqui a senha e
+          # SORTEADA e guardada em `$COFRE`, fora do git.
+          v=$(sortear_e_guardar "$proj" "$k") ;;
+      esac
+      [ -n "$v" ] && echo "  $proj: $k veio de um apelido do .env"
+    fi
+
+    # -----------------------------------------------------------------------
+    # DERIVADAS — montadas a partir do que existe
+    # -----------------------------------------------------------------------
+    if [ -z "$v" ]; then
+      case "$k" in
+        DATABASE_URL_MOTOR)
+          # O `.env` do central-ia guarda a senha, nao a URL: quem monta a
+          # string de conexao e o compose. No cluster quem monta e isto.
+          senha=$(ler_env "$env_arq" POSTGRES_PASSWORD) || senha=""
+          [ -n "$senha" ] && v="postgresql://central:${senha}@central-postgres-motor:5432/central" ;;
+        MC_HOST_MINIO)
+          # O `mc` (cliente do MinIO) recebe o servidor como UMA url com
+          # credencial embutida. Ela nao existe em lugar nenhum: e composta a
+          # partir das credenciais de raiz -- as MESMAS que acabaram de ser
+          # resolvidas acima, senao o cliente nao entraria no proprio servidor.
+          u=$(ler_env "$env_arq" MIDIA_S3_CHAVE)   || u=""
+          [ -z "$u" ] && u=$(sortear_e_guardar "$proj" MINIO_ROOT_USER)
+          w=$(ler_env "$env_arq" MIDIA_S3_SEGREDO) || w=""
+          [ -z "$w" ] && w=$(sortear_e_guardar "$proj" MINIO_ROOT_PASSWORD)
+          [ -n "$u" ] && [ -n "$w" ] && v="http://${u}:${w}@sigma-midia-minio:9000" ;;
+        PLATFORM_ADMIN_TOTP)
+          # ⚠️ OPCIONAL de verdade: o compose declara `${PLATFORM_ADMIN_TOTP:-}`,
+          # ou seja, vazio e um valor valido. Vai como vazio em vez de faltar,
+          # porque `secretKeyRef` de chave AUSENTE impede o Pod de subir.
+          v="" ; opcional=1 ;;
+      esac
+      [ -n "$v" ] && echo "  $proj: $k derivada"
+    fi
+
     # ⚠️ `POSTGRES_PASSWORD` NAO existe no `.env`, e nem deveria.
     #
     # Na estacao o Postgres e um conteiner ja criado; o `.env` so guarda a URL
@@ -96,7 +203,16 @@ stringData:"
       [ -n "$v" ] && echo "  $proj: POSTGRES_PASSWORD derivada da DATABASE_URL"
     fi
 
-    if [ -z "$v" ]; then faltando="$faltando $k"; continue; fi
+    # ⚠️ Chave marcada como opcional entra VAZIA, e nao fica de fora.
+    #
+    # 🐞 `secretKeyRef` que aponta para chave AUSENTE impede o Pod de subir --
+    # ele fica em `CreateContainerConfigError`, que nao diz qual chave falta.
+    # Vazia, o container sobe e a aplicacao trata a ausencia como ela ja
+    # trataria no compose.
+    if [ -z "$v" ] && [ "${opcional:-0}" != "1" ]; then
+      faltando="$faltando $k"; opcional=0; continue
+    fi
+    opcional=0
 
     # ⚠️ A reescrita do host do banco. `localhost`/`127.0.0.1` viram o Service.
     case "$k" in
