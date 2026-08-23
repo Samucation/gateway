@@ -38,7 +38,15 @@ falhas=0
 echo "== subindo as aplicacoes na producao local =="
 mkdir -p "$TRABALHO"
 
-while IFS='|' read -r proj ns imagens; do
+# 🐞 A LISTA VAI PELO DESCRITOR 3, E NAO PELA ENTRADA PADRAO.
+#
+# `docker build` e `kubectl apply` chamados DENTRO do laco consomem a entrada
+# padrao -- e levam junto o resto da lista. O sintoma e mudo: o script sobe o
+# PRIMEIRO projeto, imprime o resumo e encerra, como se so houvesse um.
+#
+# O mesmo defeito estava no `migrar-dados.sh` e me custou uma rodada inteira
+# procurando erro no filtro de projeto.
+while IFS='|' read -r proj ns imagens <&3; do
   [ -n "$proj" ] || continue
   [ -z "$alvo" ] || [ "$alvo" = "$proj" ] || continue
 
@@ -101,7 +109,7 @@ while IFS='|' read -r proj ns imagens; do
   for r in $(kubectl get deploy,statefulset -n "$ns" -o name 2>/dev/null); do
     kubectl rollout status -n "$ns" "$r" --timeout=300s 2>&1 | tail -1 | sed 's/^/      /'
   done
-done <<< "$LISTA"
+done 3<<< "$LISTA"
 
 echo ""
 echo "== resultado =="
