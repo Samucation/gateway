@@ -34,7 +34,7 @@ live-flow|urupix|urupix-secrets|AUTH_SECRET DATABASE_URL INTERNAL_CRON_SECRET PO
 sprinklegames-portal|sprinklegames|sprinklegames-secrets|DATABASE_URL JWT_SECRET POSTGRES_PASSWORD RESEND_API_KEY SEED_ADMIN_PASSWORD SEED_ADMIN_USERNAME|sprinklegames-postgres
 opuschat|opuschat|opuschat-secrets|ATENDIMENTO_WEBHOOK_SECRET CENTRAL_CHAVE COFRE_CHAVE DATABASE_URL JWT_SECRET PLATFORM_ADMIN_TOTP POSTGRES_PASSWORD RESEND_API_KEY|opuschat-postgres
 cafe-mobile-erp|plataforma|plataforma-secrets|ATENDIMENTO_WEBHOOK_SECRET CENTRAL_CHAVE COFRE_CHAVE DATABASE_URL JWT_SECRET PLATFORM_ADMIN_TOTP POSTGRES_PASSWORD RESEND_API_KEY|plataforma-postgres
-central-ia|central-ia|central-ia-secrets|DATABASE_URL_MOTOR POSTGRES_PASSWORD|central-postgres-motor
+central-ia|central-ia|central-ia-secrets|COFRE_CHAVE DATABASE_URL_MOTOR DATABASE_URL_PORTAL MOTOR_SEGREDO POSTGRES_PASSWORD RESEND_API_KEY TOKEN_ENCRYPTION_KEY|central-postgres-motor
 sigma-midia|sigma-midia|sigma-midia-secrets|MC_HOST_MINIO MIDIA_ADMIN_EMAIL MIDIA_ADMIN_SENHA MIDIA_DB_SENHA MIDIA_IMG_CHAVE MIDIA_IMG_SAL MIDIA_S3_APP_SENHA MIDIA_S3_APP_USER MINIO_ROOT_PASSWORD MINIO_ROOT_USER|sigma-midia-postgres
 system-api|veltrixa|veltrixa-secrets|KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_ADMIN_USER KEYCLOAK_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_SEED_ADMIN_PASSWORD NFE_POSTGRES_PASSWORD NFE_VAULT_KEK POSTGRES_PASSWORD|veltrixa-postgres
 FIM
@@ -68,6 +68,29 @@ sortear_e_guardar() {
   printf '%s=%s\n' "$chave" "$valor" >> "$arq"
   chmod 600 "$arq"
   printf '%s' "$valor"
+}
+
+# ---------------------------------------------------------------------------
+# 🐞 `?sslmode=disable` — SEM ISSO O APP NAO CONECTA, E O ERRO CULPA O SERVIDOR
+# ---------------------------------------------------------------------------
+#     Server does not support SSL, but it was required (default configuration)
+#
+# O driver de Postgres do Dart EXIGE TLS por padrao. O Postgres do cluster nao
+# tem TLS -- e nao precisa: o trafego nao sai da rede do cluster.
+#
+# ⚠️ Quem resolvia isso era o `docker-compose`, que montava a URL com
+# `?sslmode=disable` embutido. O `.env` guarda a URL de DESENVOLVIMENTO, sem o
+# parametro, e ao montar o Secret a partir dele a exigencia voltava.
+#
+# A mensagem manda olhar para o servidor ("does not support SSL") quando o que
+# esta errado e a expectativa do CLIENTE.
+sem_ssl() {
+  local url="$1"
+  case "$url" in
+    *sslmode=*) printf '%s' "$url" ;;
+    *\?*)       printf '%s&sslmode=disable' "$url" ;;
+    *)          printf '%s?sslmode=disable' "$url" ;;
+  esac
 }
 
 # Le UMA variavel do .env sem executar o arquivo.
@@ -192,6 +215,16 @@ stringData:"
           # string de conexao e o compose. No cluster quem monta e isto.
           senha=$(ler_env "$env_arq" POSTGRES_PASSWORD) || senha=""
           [ -n "$senha" ] && v="postgresql://central:${senha}@central-postgres-motor:5432/central" ;;
+        DATABASE_URL_PORTAL)
+          # Mesmo caso, outro banco: o portal tem base propria.
+          senha=$(ler_env "$env_arq" POSTGRES_PASSWORD) || senha=""
+          [ -n "$senha" ] && v="postgresql://central:${senha}@central-postgres-portal:5432/central_portal" ;;
+        MOTOR_SEGREDO)
+          # ⚠️ E o segredo que o PORTAL usa para falar com o MOTOR -- os dois
+          # leem a mesma chave. Se cada lado tivesse a sua, o portal receberia
+          # 401 do motor e o sintoma seria "a IA nao responde".
+          v=$(ler_env "$env_arq" MOTOR_SEGREDO) || v=""
+          [ -z "$v" ] && v=$(sortear_e_guardar "$proj" MOTOR_SEGREDO) ;;
         MC_HOST_MINIO)
           # O `mc` (cliente do MinIO) recebe o servidor como UMA url com
           # credencial embutida. Ela nao existe em lugar nenhum: e composta a
@@ -251,9 +284,13 @@ stringData:"
     # ⚠️ A reescrita do host do banco. `localhost`/`127.0.0.1` viram o Service.
     case "$k" in
       DATABASE_URL)
-        v=$(printf '%s' "$v" | sed -E "s#@(localhost|127\.0\.0\.1):[0-9]+#@${servico}:5432#") ;;
+        v=$(printf '%s' "$v" | sed -E "s#@(localhost|127\.0\.0\.1):[0-9]+#@${servico}:5432#")
+        v=$(sem_ssl "$v") ;;
       DATABASE_URL_SANDBOX)
-        v=$(printf '%s' "$v" | sed -E "s#@(localhost|127\.0\.0\.1):[0-9]+#@${servico}-sandbox:5432#") ;;
+        v=$(printf '%s' "$v" | sed -E "s#@(localhost|127\.0\.0\.1):[0-9]+#@${servico}-sandbox:5432#")
+        v=$(sem_ssl "$v") ;;
+      DATABASE_URL_MOTOR)
+        v=$(sem_ssl "$v") ;;
     esac
 
     # ⚠️ Bloco literal (`|-`) e indentacao fixa: um segredo com `:` ou `#`
