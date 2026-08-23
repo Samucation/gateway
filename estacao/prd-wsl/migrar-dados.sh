@@ -84,16 +84,67 @@ if [ "$alvo" = "--conferir" ]; then so_conferir=1; alvo=""; fi
 #
 # ⚠️ Nao usa `reltuples` do catalogo: aquilo e ESTIMATIVA do planejador, pode
 # estar horas desatualizada, e num banco de dinheiro estimativa nao prova nada.
+#
+# 🐞 TODOS os schemas do usuario, e nao so o `public`.
+#
+# A primeira versao filtrava `nspname = 'public'`. O `veltrixa` guarda as
+# tabelas num schema chamado `veltrixa`, e o `nfe_db` faz igual: a consulta
+# devolvia VAZIO, e o script dizia "nao consegui contar a origem".
+#
+# ⚠️ E o risco maior nao era esse aviso -- era o silencio. Num banco cujas
+# tabelas morassem fora do `public`, a contagem daria vazio DOS DOIS LADOS, e
+# "vazio = vazio" passaria como "conferido, as contagens batem". A guarda
+# aprovaria uma migracao que nao copiou nada.
+#
+# Por isso, alem de varrer todos os schemas, ela agora devolve o NUMERO DE
+# TABELAS junto -- e o script recusa contagem sem tabela nenhuma.
 cat > "$TMP_WIN/contagem.sql" <<'FIM'
-SELECT string_agg(t || '=' || n, ',' ORDER BY t) FROM (
-  SELECT c.relname AS t,
+SELECT count(*)::text || ' tabelas: ' ||
+       coalesce(string_agg(s || '.' || t || '=' || n, ',' ORDER BY s, t), '(nenhuma)')
+FROM (
+  SELECT n.nspname AS s, c.relname AS t,
          (xpath('/row/c/text()',
                 query_to_xml(format('SELECT count(*) AS c FROM %I.%I', n.nspname, c.relname),
                              false, true, '')))[1]::text::bigint AS n
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE c.relkind = 'r' AND n.nspname = 'public'
+  WHERE c.relkind = 'r'
+    AND n.nspname NOT LIKE 'pg\_%'
+    AND n.nspname <> 'information_schema'
 ) x;
 FIM
+
+# ---------------------------------------------------------------------------
+# A COMPARACAO — estrita com DADO, tolerante com SCHEMA NOVO
+# ---------------------------------------------------------------------------
+#
+# ⚠️ "Tudo igual" e criterio errado aqui, e o `nfe_db` mostrou por que: o
+# destino tinha 17 tabelas e a origem 11. Nao era perda -- era o CONTRARIO. A
+# imagem nova roda migracoes mais recentes (Flyway) e cria tabelas que a
+# producao de hoje ainda nao tem.
+#
+# Exigir igualdade total reprovaria uma migracao correta e empurraria para a
+# saida errada: apagar o schema novo para "bater" com o antigo.
+#
+# O que NAO pode acontecer, e por isso e o que se verifica:
+#
+#   - tabela que existe na origem sumir no destino;
+#   - tabela que existe nos dois ter contagem DIFERENTE.
+#
+# Tabela a mais no destino e informacao, nao defeito.
+comparar() {
+  local origem="$1" destino="$2" faltou="" divergiu="" par tab
+  for par in $(printf '%s' "${origem#*: }" | tr ',' ' '); do
+    tab="${par%%=*}"
+    case "$destino" in
+      *"$par"*)  : ;;                       # mesma tabela, mesma contagem
+      *"$tab="*) divergiu="$divergiu $par" ;;  # existe, contagem outra
+      *)         faltou="$faltou $tab" ;;      # sumiu
+    esac
+  done
+  RESULTADO_FALTOU="$faltou"
+  RESULTADO_DIVERGIU="$divergiu"
+  [ -z "$faltou" ] && [ -z "$divergiu" ]
+}
 
 contar_docker() {
   no_docker exec -i "$1" psql -U "$2" -d "$3" -tAf - < "$TMP_WIN/contagem.sql" | head -1 | tr -d '\r'
@@ -133,15 +184,22 @@ while IFS='|' read -r cont user base ns pod <&3; do
     echo "  ⚠️ nao consegui contar a ORIGEM -- nao vou copiar as cegas"
     falhas=$((falhas+1)); continue
   fi
+  # ⚠️ Origem sem tabela nenhuma nao e migracao: e engano. Recusa antes de
+  # apagar o destino com um `--clean` que nao poria nada no lugar.
+  case "$antes" in
+    0\ tabelas*)
+      echo "  ⚠️ a ORIGEM nao tem tabela nenhuma -- nao vou migrar"
+      falhas=$((falhas+1)); continue ;;
+  esac
 
   if [ "$so_conferir" = "1" ]; then
     depois=$(contar_k3s "$ns" "$pod" "$user" "$base")
-    if [ "$antes" = "$depois" ]; then
+    if comparar "$antes" "$depois"; then
       echo "  ✅ iguais"
     else
       echo "  ❌ DIFERENTES"
-      echo "     docker: ${antes:0:170}"
-      echo "     k3s   : ${depois:0:170}"
+      [ -n "$RESULTADO_FALTOU" ]   && echo "     sumiram no destino:$RESULTADO_FALTOU"
+      [ -n "$RESULTADO_DIVERGIU" ] && echo "     contagem diferente:$RESULTADO_DIVERGIU"
       falhas=$((falhas+1))
     fi
     continue
@@ -175,12 +233,18 @@ while IFS='|' read -r cont user base ns pod <&3; do
     > "$TMP_WIN/$base.restore" 2>&1
 
   depois=$(contar_k3s "$ns" "$pod" "$user" "$base")
-  if [ "$antes" = "$depois" ]; then
-    echo "  ✅ conferido: as contagens batem, tabela a tabela"
+  if comparar "$antes" "$depois"; then
+    n_orig="${antes%% *}"; n_dest="${depois%% *}"
+    if [ "$n_orig" != "$n_dest" ]; then
+      # Informacao, nao alarme: o destino roda codigo mais novo.
+      echo "  ✅ conferido ($n_orig tabelas da origem, todas iguais; destino tem $n_dest -- schema mais novo)"
+    else
+      echo "  ✅ conferido: as contagens batem, tabela a tabela"
+    fi
   else
-    echo "  ❌ CONTAGENS DIFERENTES -- a migracao deste banco NAO vale"
-    echo "     docker: ${antes:0:200}"
-    echo "     k3s   : ${depois:0:200}"
+    echo "  ❌ A MIGRACAO DESTE BANCO NAO VALE"
+    [ -n "$RESULTADO_FALTOU" ]   && echo "     sumiram no destino:$RESULTADO_FALTOU"
+    [ -n "$RESULTADO_DIVERGIU" ] && echo "     contagem diferente:$RESULTADO_DIVERGIU"
     tail -4 "$TMP_WIN/$base.restore" | sed 's/^/      /'
     falhas=$((falhas+1))
   fi
