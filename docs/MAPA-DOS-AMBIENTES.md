@@ -10,15 +10,42 @@
 
 ## 1. O que roda onde
 
-| | **PRODUÇÃO** | **HOMOLOGAÇÃO** |
+> ⚠️ **MUDOU EM 24/08/2026.** A VM `serverhomol` foi desligada e a produção
+> passou para esta estação, **fora do Docker**. O que está abaixo é o arranjo
+> de hoje; o anterior está no fim desta seção, porque a VM continua sendo a
+> volta se algo aqui der errado.
+
+| | **PRODUÇÃO** | **HOMOLOGAÇÃO** | **DESENVOLVIMENTO** |
+|---|---|---|---|
+| Onde | distro WSL2 `prd` (disco em `G:`) | k3d, dentro do Docker Desktop | Docker Compose |
+| Orquestrador | k3s | k3d (`k3d-hmg`) | — |
+| Entrada | Traefik na porta 80 | Traefik na 8090 | Kong na 8050 |
+| Como o Windows alcança | `netsh portproxy` → IP da distro | direto | direto |
+| Túnel | serviço `NerdQuizTunnel` (Windows) | serviço `Cloudflared` | — |
+| Registro de imagens | `localhost:32000`, **dentro do k3s** | espelha do prd | — |
+| Construtor | `nerdctl` + buildkit (**sem Docker**) | Docker | Docker |
+| Jenkins | serviço do systemd na distro, 1 executor | — | — |
+| SonarQube | Pod no cluster, em `sonar.hmg` | — | — |
+
+⚠️ **O Docker é ambiente de trabalho, não de produção.** Fechá-lo derruba
+homologação e desenvolvimento — e a produção continua de pé. Era esse o
+objetivo do arranjo.
+
+⚠️ **Exceção: o NerdQuiz.** `quiz` e `api` nunca ganharam manifesto de
+Kubernetes; seguem em Docker. Pará-los derruba esses dois domínios.
+
+⚠️ **Exceção: a pilha de GPU.** Kokoro, Chatterbox, Whisper e Ollama são
+contêineres Docker soltos — sem manifesto. São o último fio que prende a
+produção ao Docker. O WSL2 repassa CUDA, então cabem no cluster; falta
+escrever os manifestos.
+
+### O arranjo anterior, para quem precisar da volta
+
+| | **PRODUÇÃO (até 23/08)** | **HOMOLOGAÇÃO** |
 |---|---|---|
-| Máquina | VM `serverhomol` | esta estação de trabalho |
-| Orquestrador | MicroK8s | k3d (`k3d-hmg`) |
-| Entrada | Traefik na porta 80 | Traefik na porta 8090 |
-| Túnel | serviço `cloudflared` na VM | serviço `Cloudflared` no Windows |
-| Domínios | `<projeto>.cursodetecnologia.dev.br` | `<projeto>-hmg.…` **e** `<projeto>.hmg` |
-| Registro de imagens | `:32000` na VM (usado pelos DOIS) | espelhado de lá |
-| Jenkins | na VM, **1 executor** | — |
+| Máquina | VM `serverhomol` | esta estação |
+| Orquestrador | MicroK8s | k3d |
+| Jenkins | na VM | — |
 
 **Nove sistemas**, os dois ambientes: `urupix` (live-flow), `sprinklegames`,
 `opuschat`, `plataforma` (cafe-mobile-erp), `veltrixa` (system-api),
