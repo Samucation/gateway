@@ -649,18 +649,41 @@ for p in PROJETOS:
                     # manifesto da plataforma e busca por digest. Se nao vier
                     # 200, a esteira falha AQUI -- e nao dias depois, num
                     # incidente.
-                    A='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json'
+                    # ⚠️ TODOS os tipos, INDICE INCLUSIVE, e sem espaco depois
+                    # das virgulas.
+                    #
+                    # 🐞 A versao anterior listava so os tipos de manifesto
+                    # SIMPLES e reprovava indice por principio -- porque na VM o
+                    # indice significava atestado do BuildKit, cujos filhos
+                    # sumiam. Com `nerdctl`, indice e o formato NORMAL de
+                    # publicacao, e a recusa passou a reprovar imagem boa.
+                    #
+                    # E o registro e literal quanto ao cabecalho: pedindo so um
+                    # dos dois tipos de indice ele devolve 404 com
+                    # "OCI index found, but accept header does not support OCI
+                    # indexes" -- 404 que parece imagem ausente e e negociacao
+                    # de conteudo.
+                    A='application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json'
 
                     conferir() {
                         M=$(curl -sf -H "Accept: $A" "http://$REGISTRO/v2/$1/manifests/$TAG")
                         if [ -z "$M" ]; then echo "    FALHA $1:$TAG -- sem manifesto no registro"; return 1; fi
 
-                        # ⚠️ Com `--provenance=false --sbom=false` o correto e um
-                        # manifesto SIMPLES. Se vier um indice, os atestados
-                        # voltaram -- e o filho da plataforma some com o tempo.
+                        # Se for indice, SEGUE ate o manifesto da plataforma. O
+                        # que interessa nao e o formato: e se da para BAIXAR.
                         if echo "$M" | grep -q '"manifests"'; then
-                            echo "    FALHA $1:$TAG -- e um INDICE; faltou --provenance=false"
-                            return 1
+                            D=$(echo "$M" | tr ',' '
+' | grep -A 3 'linux' | grep -oE 'sha256:[0-9a-f]{64}' | head -1)
+                            [ -n "$D" ] || D=$(echo "$M" | grep -oE 'sha256:[0-9a-f]{64}' | head -1)
+                            if [ -z "$D" ]; then
+                                echo "    FALHA $1:$TAG -- indice sem nenhum filho"
+                                return 1
+                            fi
+                            M=$(curl -sf -H "Accept: $A" "http://$REGISTRO/v2/$1/manifests/$D")
+                            if [ -z "$M" ]; then
+                                echo "    FALHA $1:$TAG -- indice aponta para filho que NAO existe"
+                                return 1
+                            fi
                         fi
 
                         # E os BLOBS tem que estar la. Foi isto que se perdeu: a

@@ -31,6 +31,26 @@ apt-get install -y -qq \
 diga "java: $(java -version 2>&1 | head -1)"
 
 # ---------------------------------------------------------------------------
+# 1a. Node -- a esteira roda `npm` DIRETO no agente, sem conteiner
+# ---------------------------------------------------------------------------
+#
+# 🐞 O estagio de testes dos projetos Node chama `npm ci` e `npm test` na
+# propria maquina do Jenkins (so o BUILD da imagem e em conteiner). Sem Node
+# instalado o estagio morre com
+#
+#     script.sh: 6: npm: not found       (exit 127)
+#
+# ...e o `127` nao aparece em lugar nenhum como "falta instalar": o painel
+# mostra "Testes + cobertura FAILED" e o log some no meio de vinte linhas de
+# limpeza do post-actions.
+if ! command -v npm >/dev/null 2>&1; then
+  diga "instalando Node LTS..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null 2>&1
+  apt-get install -y -qq nodejs >/dev/null 2>&1
+fi
+diga "node: $(node --version 2>&1) | npm: $(npm --version 2>&1)"
+
+# ---------------------------------------------------------------------------
 # 1b. DNS fixo — o buildkit nao se da bem com o resolvedor do WSL
 # ---------------------------------------------------------------------------
 #
