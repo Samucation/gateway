@@ -213,17 +213,26 @@ ingress:
   # Exposicao conferida em 17/08/2026 antes de publicar: sem assinatura o
   # MinIO devolve 403 em GET, LIST, PUT e DELETE, e o console (9101) nao
   # responde por esta porta.
+  # ⚠️ 8050 nas DUAS rotas abaixo, e nao 9102/9100.
+  # Aquelas eram as portas do imgproxy e do MinIO no Docker. Com a producao
+  # no k3s, quem separa `/img` do resto e o Ingress do cluster -- e a 8050 e
+  # a porta que o Windows encaminha para o Traefik de la.
+  #
+  # 🐞 Sem isto, a URL ASSINADA de upload aponta para este dominio, o Pod
+  # tenta enviar os bytes e leva 502 -- e a tela mostra "arquivo nao e uma
+  # imagem valida". O arquivo esta perfeito; o caminho de gravacao e que
+  # estava cortado.
 
   # 1) imagens derivadas (imgproxy). Casa com IMGPROXY_PATH_PREFIX=/img.
   - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
     path: ^/img(/.*)?$
-    service: http://localhost:9102
+    service: http://localhost:8050
     originRequest:
       httpHostHeader: sigma-midia-arquivos.cursodetecnologia.dev.br
 
   # 2) o resto e o motor de objetos (MinIO), so por URL assinada.
   - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
-    service: http://localhost:9100
+    service: http://localhost:8050
     originRequest:
       httpHostHeader: sigma-midia-arquivos.cursodetecnologia.dev.br
 
