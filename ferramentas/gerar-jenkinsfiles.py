@@ -184,7 +184,21 @@ pipeline {{
 
     options {{
         buildDiscarder(logRotator(numToKeepStr: '15'))
-        timeout(time: 45, unit: 'MINUTES')
+        // 🐞 O TEMPO CORRE NA FILA TAMBEM, e isso ja derrubou build boa.
+        //
+        // Este Jenkins tem UM executor de proposito: cinco builds ao mesmo tempo
+        // encheram o disco a 97%% e o Kubernetes despejou sete Pods. Entao um
+        // push em varios repositorios de uma vez forma fila -- e `timeout` no
+        // nivel do pipeline conta desde que a build ENTRA, nao desde que ela
+        // comeca a rodar.
+        //
+        // Com 45 minutos e uma fila de oito, as ultimas terminavam em ABORTED
+        // sem ter executado um unico estagio. ⚠️ E ABORTED nao se le como
+        // "esperou demais": se le como "alguem cancelou", e manda procurar quem.
+        //
+        // 3 horas cobre a fila inteira e continua pegando build TRAVADA, que e
+        // para o que este limite existe.
+        timeout(time: 180, unit: 'MINUTES')
         // Uma execucao por vez. Duas aplicariam manifestos concorrentes no mesmo
         // namespace, e o vencedor seria o mais LENTO -- o cluster acabaria com a
         // versao mais antiga das duas.
