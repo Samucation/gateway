@@ -48,6 +48,29 @@ v.save()
 println("  filtro: .*/main\$   |   jobs visiveis: ${v.getItems().size()}")
 
 // ---------------------------------------------------------------------------
+// "Painel" -- a MESMA lista, com o nome que o mural procura.
+// ---------------------------------------------------------------------------
+//
+// 🐞 O painel em `userContent/painel/` busca `view/Painel/api/json`. Sem uma
+// visao com ESSE nome, a chamada devolve 404 e o mural abre VAZIO -- sem erro
+// na tela, sem nada no console. Foi assim que ele "nao renderizou" antes.
+//
+// ⚠️ Duas visoes com o mesmo filtro nao e duplicacao a toa: uma e para OLHAR
+// no Jenkins, a outra e uma API que o mural consome. Renomear qualquer uma
+// quebra algo em silencio.
+def nomePainel = 'Painel'
+def vp = inst.getView(nomePainel)
+if (vp == null) {
+    vp = new ListView(nomePainel, inst)
+    inst.addView(vp)
+    println("  visao '${nomePainel}' criada")
+}
+vp.setRecurse(true)
+vp.setIncludeRegex('.*/main$')
+vp.save()
+println("  visao '${nomePainel}': ${vp.getItems().size()} job(s)")
+
+// ---------------------------------------------------------------------------
 // A visao vira a INICIAL, para ser o que se ve ao abrir o Jenkins.
 // ---------------------------------------------------------------------------
 inst.setPrimaryView(v)
