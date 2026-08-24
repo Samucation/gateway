@@ -22,7 +22,7 @@
 | Entrada | **Kong** (Pod, `hostPort` 80 e 8050) | Traefik na 8090 | Kong na 8050 |
 | Como o Windows alcança | `netsh portproxy` → IP da distro | direto | direto |
 | Túnel | serviço `NerdQuizTunnel` (Windows) | serviço `Cloudflared` | — |
-| Registro de imagens | `localhost:32000`, **dentro do k3s** | espelha do prd | — |
+| Registro de imagens | `localhost:32000`, **dentro do k3s** | **próprio**, Docker :32001 (dados em `G:`) | — |
 | Construtor | `nerdctl` + buildkit (**sem Docker**) | Docker | Docker |
 | Jenkins | serviço do systemd na distro, 1 executor | — | — |
 | SonarQube | Pod no cluster, em `sonar.hmg` | — | — |
@@ -30,6 +30,51 @@
 ⚠️ **O Docker é ambiente de trabalho, não de produção.** Fechá-lo derruba
 homologação e desenvolvimento — e a produção continua de pé. Era esse o
 objetivo do arranjo.
+
+### Como a HOMOLOGAÇÃO está montada (24/08/2026)
+
+Ela existe de novo, e é um cluster **de verdade separado** — não o mesmo com
+outro nome:
+
+```
+   produção      k3s   na distro WSL2 `prd`     kubeconfig padrão
+   homologação   k3d   no Docker Desktop        --kubeconfig ~/.kube/config-hmg
+```
+
+47 Pods, os 9 projetos, cada um com o **seu** banco. A entrada é o Traefik do
+k3d, publicado pelo Docker na `8090` da máquina — e é por lá que a esteira
+verifica, com o cabeçalho `Host` de cada domínio `*.hmg`.
+
+**Fechar o Docker derruba a homologação inteira, e a produção não sente.** Era
+esse o objetivo do arranjo.
+
+#### As duas coisas que precisaram existir para religar
+
+1. **Um registro de imagens só dela** (Docker, `:32001`). O registro da produção
+   vive *dentro* da distro WSL2, e contêiner do Docker **não tem rota até lá** —
+   medido: de um contêiner, `ping` na distro perde 100% dos pacotes. As duas
+   distros do WSL só se encontram através de porta publicada no host Windows.
+   A esteira publica na produção e **espelha** para cá.
+
+   ⚠️ Os dados ficam em `G:\docker-registro-hmg`, e não em volume do Docker: o
+   `C:` já chegou a 0 GB nesta máquina e derrubou tudo. Custo: as imagens ficam
+   em duplicidade. Para limpar:
+   `docker exec registro-hmg registry garbage-collect /etc/docker/registry/config.yml`
+
+2. **A variável `HMG_CONTEXTO`**, que liga as três etapas de homologação das
+   esteiras. Elas estavam desligadas desde 21/08 por uma guarda **certa**:
+   naquele dia a estação virou produção, as esteiras continuaram aplicando
+   `overlays/hmg` no cluster que agora era produção, e às 20:48 o Ingress do
+   Urupix voltou de `urupix.com.br` para `urupix.hmg` — domínio público em 404
+   com a aplicação de pé.
+
+   O `vm/hmg-religado.groovy` religa, mas **confere antes** que o nó do outro
+   lado não é o mesmo da produção. Se for, recusa e explica.
+
+⚠️ **O espelho do k3d apontava para os quatro IPs da VM desligada.** A
+homologação não conseguia baixar imagem nova — e não aparecia, porque os Pods
+seguiam no ar com o que já estava no nó, e a próxima implantação nunca chegava
+(as etapas estavam desligadas). Dois defeitos se escondendo um atrás do outro.
 
 ### Como o tráfego entra hoje (24/08/2026)
 
