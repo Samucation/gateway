@@ -42,7 +42,15 @@ pipeline {
     }
 
     environment {
-        KUBECTL = 'microk8s kubectl'
+        // ⚠️ Era `microk8s kubectl`, da VM `serverhomol`. Ela foi desligada em
+        // 23/08/2026 e a producao passou para o k3s da distro WSL2 `prd`, onde
+        // o proprio Jenkins roda -- entao `kubectl` puro ja fala com ela.
+        //
+        // 🐞 Enquanto ficou desatualizado, o estagio morria com
+        // `microk8s: not found`, que parece binario faltando e e AMBIENTE
+        // trocado. Este Jenkinsfile e escrito a mao, entao nao foi corrigido
+        // junto com os gerados.
+        KUBECTL = 'kubectl'
     }
 
     stages {
@@ -100,7 +108,7 @@ pipeline {
                 sh '''
                     set -e
                     echo "==> PUBLICANDO o gateway. Todas as rotas caem por alguns segundos."
-                    # KUBECTL sem sudo: o usuario jenkins esta no grupo microk8s e
+                    # KUBECTL sem sudo: o usuario jenkins le o kubeconfig do k3s e
                     # NAO tem sudo sem senha -- com sudo, o script travaria
                     # esperando uma senha ate estourar o tempo limite.
                     KUBECTL="$KUBECTL" bash vm/publicar.sh
