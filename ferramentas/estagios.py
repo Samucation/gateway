@@ -869,13 +869,28 @@ TESTES_DART = """
                     # falhando exatamente com o mesmo erro -- por isso o
                     # atalho para o nome que ele procura.
                     #
-                    # O `-` manda o Dockerfile pela ENTRADA e nao usa contexto
-                    # nenhum: mandar o repositorio inteiro para o Docker so para
-                    # instalar uma biblioteca custaria segundos a cada rodada.
-                    docker build -q -t %(tag)s - > /dev/null <<'FIM'
+                    # 🐞 O `-` (Dockerfile pela ENTRADA) NAO funciona aqui.
+                    #
+                    # O `docker build -` aceita o Dockerfile no stdin, e era
+                    # assim que isto estava escrito. O construtor desta maquina
+                    # e o `nerdctl`, e ele recusa:
+                    #
+                    #     unsupported build context: "-"
+                    #
+                    # A mensagem nem parece o que e -- soa como contexto
+                    # invalido no repositorio, e e a FORMA de passar o
+                    # Dockerfile que mudou junto com a ferramenta.
+                    #
+                    # ⚠️ E o contexto continua sendo uma pasta VAZIA, de
+                    # proposito: mandar o repositorio inteiro so para instalar
+                    # uma biblioteca custaria segundos a cada rodada.
+                    CTX=$(mktemp -d)
+                    cat > "$CTX/Dockerfile" <<'FIM'
 FROM %(imagem)s
 RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/* && ln -sf "$(ldconfig -p | awk '/libsqlite3.so.0/ { print $NF; exit }')" /usr/lib/libsqlite3.so
 FIM
+                    docker build -q -t %(tag)s "$CTX" > /dev/null
+                    rm -rf "$CTX"
 
                     for pasta in %(pastas)s; do
                         echo "==> testando $pasta"
