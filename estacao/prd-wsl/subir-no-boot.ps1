@@ -39,9 +39,24 @@ Cria (ou recria) a tarefa agendada. Precisa de Administrador.
 param(
     [switch]$Instalar,
     [string]$Distro = 'prd',
-    # 8050 = Kong (a entrada da produção). 32000 = registro de imagens.
+    # 🐞 ESTA LISTA E O CORTE JÁ DISCORDARAM, E NINGUÉM VIA.
+    #
+    # Aqui o mapeamento é sempre porta→MESMA porta. Entre 23 e 24/08/2026 não
+    # havia Kong no cluster, e `CORTAR-PARA-K3S.ps1` mapeava `8050 → 80` (o
+    # Traefik) enquanto esta tarefa mapeava `8050 → 8050` (ninguém).
+    #
+    # Nada acusava: a produção estava de pé porque valia o mapeamento do corte.
+    # No primeiro reinício da máquina esta tarefa rodaria, refaria a tabela do
+    # seu jeito e TODOS os domínios cairiam em 502 — e o log diria "tudo certo",
+    # porque ela conferiu o que ela mesma escreveu.
+    #
+    # Com o Kong de volta como Pod (`hostPort: 8050`), os dois voltaram a
+    # concordar. Se um dia o destino da 8050 mudar de novo, tem de mudar NOS
+    # DOIS ARQUIVOS.
+    #
+    # 80 = Traefik. 8050 = Kong (a entrada da produção). 32000 = registro.
     # 8080 = Jenkins.
-    [int[]]$Portas = @(8050, 32000, 8080)
+    [int[]]$Portas = @(80, 8050, 32000, 8080)
 )
 
 $ErrorActionPreference = 'Stop'

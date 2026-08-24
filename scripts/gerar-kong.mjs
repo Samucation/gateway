@@ -99,9 +99,26 @@ const PROJETOS = [
   {
     id: "central",
     config: "central-ia/deploy/kong/kong.yml",
-    // sem domínio público ainda — atendido por porta local. Fica um host
-    // interno para a rota não virar curinga e roubar `/` dos outros.
-    hosts: ["central.interno"],
+    // 🐞 PELA SEGUNDA VEZ NESTE ARQUIVO: domínio público que só existia no
+    // arquivo GERADO.
+    //
+    // Aqui estava escrito "sem domínio público ainda", com apenas
+    // `central.interno`. Mas `central-ia.cursodetecnologia.dev.br` está no
+    // túnel, no Ingress e no `kong.yml` commitado — foi acrescentado à mão
+    // depois, e ninguém voltou aqui. Rodar o gerador tirava o domínio do Kong.
+    //
+    // ⚠️ E não derrubava o site: ele caía na rota de RESERVA, que repassa ao
+    // Traefik. Continuava respondendo 200, só que sem correlation-id, sem o
+    // CORS do projeto e sem teto de requisições. Foi a exigência de
+    // `X-Request-Id` em `estacao/prd-wsl/conferir-kong.sh` que pegou; conferir
+    // código HTTP não pegaria nunca.
+    //
+    // É a mesma armadilha do `opuschat` logo acima. A lição comum: host que não
+    // está NESTA lista não está no gateway, por mais que apareça no gerado.
+    //
+    // `central.interno` fica: é por ele que as checagens locais falam com o
+    // projeto sem depender do túnel.
+    hosts: ["central-ia.cursodetecnologia.dev.br", "central.interno"],
     redes: ["central-ia_default"],
   },
   {

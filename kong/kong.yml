@@ -1534,7 +1534,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               }
           ],
         plugins:
@@ -1656,7 +1656,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               }
           ],
         plugins:
@@ -1778,7 +1778,7 @@ services:
                           }
                       }
                   ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               }
           ],
         plugins:
@@ -1889,7 +1889,26 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 methods: [ GET ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                # ⚠️ Teto, mesmo sendo leitura e sem login.
+              #
+              # Era a ÚNICA rota pública do gateway sem teto, e o guarda
+              # `conferir-exposicao.mjs` reprovava a build por causa dela. Sem teto,
+              # quem descobrir o endereço consulta em laço: cada `/v1/uso` é uma
+              # leitura no banco do motor, e o motor é o mesmo processo que atende a
+              # GPU.
+              #
+              # 120/minuto por IP é folga larga para monitor externo (um a cada meio
+              # segundo) e não tira o propósito da rota, que é ser olhada sem pedir
+              # login. `fault_tolerant` para que falha no contador nunca derrube a
+              # checagem de saúde — seria irônico.
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 120, policy: local, fault_tolerant: true, limit_by: ip }
+                      }
+                  ],
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               }
           ],
         plugins:
@@ -2007,7 +2026,7 @@ services:
                 strip_path: false,
                 preserve_host: true,
                 plugins: [ { name: rate-limiting, config: { minute: 60, policy: local, limit_by: ip } } ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               },
 
             {
@@ -2019,7 +2038,7 @@ services:
                   [
                     { name: rate-limiting, config: { minute: 300, policy: local, limit_by: ip } }
                   ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               },
 
             {
@@ -2034,7 +2053,7 @@ services:
                         config: { minute: 1200, policy: local, fault_tolerant: true, limit_by: ip }
                       }
                   ],
-                hosts: [ central.interno, central-ia.cursodetecnologia.dev.br ]
+                hosts: [ central-ia.cursodetecnologia.dev.br, central.interno ]
               }
           ],
         plugins:

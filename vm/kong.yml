@@ -588,7 +588,6 @@ services:
           - DELETE
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -671,7 +670,6 @@ services:
           - POST
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -701,7 +699,6 @@ services:
           - PUT
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -736,7 +733,6 @@ services:
           - POST
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -754,7 +750,6 @@ services:
         methods:
           - POST
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -766,7 +761,6 @@ services:
               fault_tolerant: true
       - name: plataforma-api-operador-bloqueio-publico
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         paths:
           - /v1/platform
@@ -814,7 +808,6 @@ services:
           - GET
           - POST
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -851,7 +844,6 @@ services:
           - GET
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -887,7 +879,6 @@ services:
           - GET
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: rate-limiting
@@ -923,7 +914,6 @@ services:
           - GET
           - OPTIONS
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         plugins:
           - name: response-transformer
@@ -953,7 +943,6 @@ services:
               fault_tolerant: true
       - name: plataforma-web-painel-bloqueio-publico
         hosts:
-          - opuschat.cursodetecnologia.dev.br
           - cafe-api.cursodetecnologia.dev.br
         paths:
           - /painel
@@ -1031,6 +1020,7 @@ services:
               limit_by: header
               header_name: authorization
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
     plugins:
       - name: correlation-id
@@ -1115,6 +1105,7 @@ services:
               limit_by: header
               header_name: authorization
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
     plugins:
       - name: correlation-id
@@ -1199,6 +1190,7 @@ services:
               limit_by: header
               header_name: authorization
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
     plugins:
       - name: correlation-id
@@ -1274,7 +1266,15 @@ services:
         preserve_host: true
         methods:
           - GET
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: true
+              limit_by: ip
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
     plugins:
       - name: correlation-id
@@ -1360,6 +1360,7 @@ services:
               policy: local
               limit_by: ip
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
       - name: central-portal-admin
         paths:
@@ -1374,6 +1375,7 @@ services:
               policy: local
               limit_by: ip
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
       - name: central-portal-resto
         paths:
@@ -1388,6 +1390,7 @@ services:
               fault_tolerant: true
               limit_by: ip
         hosts:
+          - central-ia.cursodetecnologia.dev.br
           - central.interno
     plugins:
       - name: correlation-id
@@ -1695,3 +1698,391 @@ services:
         config:
           status_code_metrics: true
           latency_metrics: true
+  - name: plataforma-api-opuschat
+    url: http://opuschat-app.opuschat.svc.cluster.local:8080
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    retries: 2
+    routes:
+      - name: plataforma-api-mensageria-opuschat
+        paths:
+          - /v1/messaging
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              hour: 20000
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+              hide_client_headers: false
+          - name: cors
+            config:
+              origins:
+                - http://localhost:8000
+                - http://localhost:8080
+              methods:
+                - GET
+                - POST
+                - PUT
+                - DELETE
+                - OPTIONS
+              headers:
+                - Authorization
+                - Content-Type
+                - Idempotency-Key
+                - X-Client-Name
+                - X-Request-Id
+              exposed_headers:
+                - X-Request-Id
+                - RateLimit-Remaining
+              credentials: false
+              max_age: 3600
+          - name: response-transformer
+            config:
+              add:
+                headers:
+                  - "Content-Security-Policy: default-src 'none';
+                    frame-ancestors 'none'"
+                  - "X-Content-Type-Options: nosniff"
+              remove:
+                headers:
+                  - X-Powered-By
+                  - Server
+      - name: plataforma-api-porta-de-entrada-opuschat
+        paths:
+          - /v1/signup
+          - /v1/login
+        strip_path: false
+        methods:
+          - POST
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 10
+              hour: 60
+              policy: local
+              limit_by: ip
+              fault_tolerant: false
+      - name: plataforma-api-mesa-do-atendente-opuschat
+        paths:
+          - /v1/atendimento
+          - /v1/ramo
+          - /v1/profissionais
+          - /v1/equipe
+          - /v1/painel
+          - /v1/configuracoes
+          - /v1/convite
+          - /v1/planos
+          - /v1/pagamentos
+          - /v1/senha
+          - /v1/eu
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              limit_by: header
+              header_name: Authorization
+              minute: 3000
+              policy: local
+              fault_tolerant: true
+          - name: cors
+            config:
+              origins:
+                - http://localhost:8020
+                - http://localhost:8080
+              methods:
+                - GET
+                - POST
+                - PUT
+                - OPTIONS
+              headers:
+                - Authorization
+                - Content-Type
+                - X-Request-Id
+              credentials: false
+              max_age: 3600
+      - name: plataforma-api-marketing-opuschat
+        paths:
+          - /v1/marketing
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              hour: 600
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+      - name: plataforma-api-atendimento-da-casa-opuschat
+        paths:
+          - /v1/atendimento/concluido
+        strip_path: false
+        methods:
+          - POST
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: header
+              header_name: Authorization
+              fault_tolerant: true
+      - name: plataforma-api-operador-bloqueio-publico-opuschat
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        paths:
+          - /v1/platform
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              message: Not Found
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+  - name: plataforma-webhooks-opuschat
+    url: http://opuschat-app.opuschat.svc.cluster.local:8080
+    connect_timeout: 5000
+    write_timeout: 15000
+    read_timeout: 15000
+    retries: 0
+    routes:
+      - name: plataforma-webhooks-provedores-opuschat
+        paths:
+          - ~/v1/messaging/webhooks/.*
+        strip_path: false
+        methods:
+          - GET
+          - POST
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 6000
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+  - name: plataforma-web-opuschat
+    url: http://opuschat-app.opuschat.svc.cluster.local:8080
+    connect_timeout: 5000
+    read_timeout: 15000
+    routes:
+      - name: plataforma-web-checkout-opuschat
+        paths:
+          - /planos
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+          - name: response-transformer
+            config:
+              remove:
+                headers:
+                  - Content-Security-Policy
+              add:
+                headers:
+                  - "Content-Security-Policy: default-src 'self'; script-src
+                    'self' 'unsafe-inline' https://sdk.mercadopago.com
+                    https://http2.mlstatic.com; style-src 'self'
+                    'unsafe-inline'; img-src 'self' data:
+                    https://http2.mlstatic.com; font-src 'self'; connect-src
+                    'self' https://api.mercadopago.com
+                    https://api.mercadolibre.com; frame-src
+                    https://sdk.mercadopago.com https://www.mercadopago.com;
+                    object-src 'none'; base-uri 'self'; form-action 'self';
+                    frame-ancestors 'none'"
+      - name: plataforma-web-publico-opuschat
+        paths:
+          - /
+          - /inicio
+          - /portal
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: plataforma-web-docs-opuschat
+        paths:
+          - /docs
+        strip_path: false
+        methods:
+          - GET
+          - OPTIONS
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        plugins:
+          - name: response-transformer
+            config:
+              replace:
+                headers:
+                  - "X-Frame-Options: DENY"
+              add:
+                headers:
+                  - "X-Content-Type-Options: nosniff"
+                  - "Referrer-Policy: same-origin"
+                  - "Content-Security-Policy: default-src 'self'; script-src
+                    'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+                    img-src 'self' data:; font-src 'self' data:; connect-src
+                    'self'; object-src 'none'; base-uri 'self'; form-action
+                    'self'; frame-ancestors 'none'"
+                  - "Permissions-Policy: camera=(), microphone=(),
+                    geolocation=()"
+              remove:
+                headers:
+                  - X-Powered-By
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              limit_by: ip
+              fault_tolerant: true
+      - name: plataforma-web-painel-bloqueio-publico-opuschat
+        hosts:
+          - opuschat.cursodetecnologia.dev.br
+        paths:
+          - /painel
+        strip_path: false
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              message: Not Found
+    plugins:
+      - name: correlation-id
+        config:
+          header_name: X-Request-Id
+          generator: uuid#counter
+          echo_downstream: true
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          latency_metrics: true
+          per_consumer: false
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 8
+          size_unit: megabytes
+      - name: response-transformer
+        config:
+          replace:
+            headers:
+              - "X-Frame-Options: DENY"
+          add:
+            headers:
+              - "X-Content-Type-Options: nosniff"
+              - "Referrer-Policy: same-origin"
+              - "Content-Security-Policy: default-src 'self'; script-src 'self'
+                'unsafe-inline' https://accounts.google.com; style-src 'self'
+                'unsafe-inline'; img-src 'self' data:; font-src 'self';
+                connect-src 'self' https://accounts.google.com; frame-src
+                https://accounts.google.com; object-src 'none'; base-uri 'self';
+                form-action 'self'; frame-ancestors 'none'"
+              - "Permissions-Policy: camera=(), microphone=(), geolocation=(),
+                payment=(), usb=()"
+              - "Strict-Transport-Security: max-age=31536000"
+          remove:
+            headers:
+              - X-Powered-By
+              - Server
+  - name: traefik-reserva
+    url: http://traefik.kube-system.svc.cluster.local:80
+    retries: 0
+    routes:
+      - name: traefik-reserva-tudo
+        paths:
+          - /
+        strip_path: false
+        preserve_host: true

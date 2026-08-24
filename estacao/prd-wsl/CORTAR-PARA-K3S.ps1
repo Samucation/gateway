@@ -136,17 +136,27 @@ if ($Para -eq 'k3s') {
     Diga "k3s atendendo em $ip (urupix 200)"
 
     Diga '== 2. ligando as portas do Windows a distro =='
-    # 🐞 A 8050 APONTA PARA A 80 DA DISTRO, e nao para a 8050.
+    # 🐞 A 8050 JA APONTOU PARA A 80 DA DISTRO -- e agora aponta para a 8050.
     #
-    # A primeira execucao mapeou 8050 -> 8050 e derrubou onze dominios em 502.
-    # O motivo: no Docker, a 8050 era o Kong. No cluster nao ha Kong -- quem
-    # recebe e o Traefik, na porta 80. Do outro lado da 8050 nao havia
-    # ninguem.
+    # A primeira execucao mapeou 8050 -> 8050 e derrubou onze dominios em 502:
+    # no Docker a 8050 era o Kong, e no cluster recem-cortado nao havia Kong
+    # nenhum. O destino certo naquele momento era o Traefik, na porta 80.
+    #
+    # Em 24/08/2026 o Kong voltou, agora como Pod (`vm/k8s.yaml`), com
+    # `hostPort: 8050`. Entao o destino volta a ser a 8050 -- e com ele voltam
+    # os plugins que o Traefik nao faz: correlation-id, rate-limit, CORS por
+    # projeto e as metricas do Prometheus. Ficar na 80 mantinha os dominios de
+    # pe SEM nenhuma dessas defesas, que e o pior tipo de "funcionando".
+    #
+    # ⚠️ Host que o Kong nao declara (veltrixa, ninjasystem, sprinklegames,
+    # sigma-midia-arquivos) NAO fica de fora: a rota de reserva do kong.yml
+    # repassa para o Traefik. Conferido host a host por
+    # `conferir-kong.sh` antes desta troca.
     #
     # ⚠️ O tunel continua apontando para `localhost:8050`, e e de proposito:
     # assim o `config.yml` nao precisa mudar, e a volta para o Docker e so
     # remover o encaminhamento.
-    foreach ($par in @(@(80, 80), @(8050, 80))) {
+    foreach ($par in @(@(80, 80), @(8050, 8050))) {
         $de = $par[0]; $para = $par[1]
         & netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$de 2>&1 | Out-Null
         & netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$de connectaddress=$ip connectport=$para 2>&1 | Out-Null

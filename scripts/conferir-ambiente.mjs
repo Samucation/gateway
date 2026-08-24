@@ -36,8 +36,20 @@ const WORKSPACE = path.resolve("..");
 // assim que se prova que o guarda REPROVA de verdade, sem mexer no gateway
 const CONTAINER = process.env.GATEWAY_CONTAINER ?? "gateway-kong";
 
-// Onde procurar quando o Kong NÃO for um container Docker. Na VM ele é Pod.
-const KUBECTL = process.env.GATEWAY_KUBECTL ?? "microk8s kubectl";
+// Onde procurar quando o Kong NÃO for um container Docker. Hoje ele é Pod.
+//
+// 🐞 O padrão era `microk8s kubectl`, da VM `serverhomol`. Ela saiu do ar em
+// 23/08/2026 e a produção passou para o k3s da distro WSL2 `prd`, onde
+// `kubectl` puro já fala com o cluster. Enquanto ficou desatualizado, este
+// guarda reprovava toda build do gateway com
+//
+//     kubernetes: spawn microk8s ENOENT
+//
+// ⚠️ Que se lê como "o Kubernetes não respondeu" e é "eu procurei com o comando
+// da máquina que não existe mais". A pista honesta estava na linha de cima —
+// ela dizia que também não achou o container Docker, e as duas juntas
+// sugeriam Kong fora do ar quando o Kong é que ainda não tinha sido publicado.
+const KUBECTL = process.env.GATEWAY_KUBECTL ?? "kubectl";
 const NAMESPACE = process.env.GATEWAY_NAMESPACE ?? "gateway";
 const ALVO = process.env.GATEWAY_ALVO ?? "deploy/kong";
 

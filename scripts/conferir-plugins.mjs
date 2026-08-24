@@ -41,6 +41,33 @@ import { parse } from "yaml";
 // arquivo faltando quando o problema e o caminho.
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// ---------------------------------------------------------------------------
+// REFORÇOS: plugin que o gerado GANHOU de propósito.
+// ---------------------------------------------------------------------------
+// 🐞 Este script e o `conferir-exposicao.mjs` se contradiziam.
+//
+// O outro EXIGE teto de requisições em toda rota pública. Este reprova qualquer
+// plugin que não estivesse na referência congelada. Pôr o teto que o primeiro
+// pedia fazia o segundo reprovar:
+//
+//     ❌ central saude/saude: ganhou "rate-limiting", que não existia
+//
+// Sem saída: um guarda mandava acrescentar, o outro proibia — e a contradição
+// só aparecia depois de obedecer ao primeiro.
+//
+// A assimetria certa é: PERDER plugin é sempre defeito; GANHAR é defeito só
+// quando ninguém declarou. Endurecer a defesa continua possível, mas tem de ser
+// um ATO, com o motivo escrito aqui, e nunca deriva silenciosa.
+//
+// ⚠️ Isto NÃO afrouxa a checagem que importa: `referencia/` segue congelado, e
+// perder plugin continua reprovando.
+const REFORCOS = {
+  "central saude/saude": {
+    "rate-limiting":
+      "rota publica e sem login; sem teto, /v1/uso vira leitura em laco no banco do motor",
+  },
+};
+
 const PROJETOS = [
   { id: "liveflow", config: "live-flow/deploy/kong/kong.yml" },
   { id: "sigmafin", config: "sigma-financeiro/deploy/kong/kong.yml" },
@@ -132,6 +159,9 @@ async function main() {
   );
 
   let rotasOk = 0;
+  // Reforço declarado não reprova, mas é ANUNCIADO: um endurecimento de defesa
+  // que passa em silêncio some do radar de quem lê o log da esteira.
+  const reforcos = [];
 
   for (const proj of PROJETOS) {
     // 🐞 A base de comparação vem de `referencia/`, e NÃO dos repositórios
@@ -170,7 +200,11 @@ async function main() {
         }
       }
       for (const nome of obtido.keys()) {
-        if (!esperado.has(nome)) {
+        if (esperado.has(nome)) continue;
+        const motivo = REFORCOS[`${proj.id} ${rota}`]?.[nome];
+        if (motivo) {
+          reforcos.push(`${proj.id} ${rota}: +${nome} — ${motivo}`);
+        } else {
           problemas.push(`${proj.id} ${rota}: ganhou "${nome}", que não existia`);
         }
       }
@@ -185,6 +219,7 @@ async function main() {
     process.exit(1);
   }
 
+  for (const r of reforcos) console.log(`   ↑ reforço declarado: ${r}`);
   console.log(`✅ ${rotasOk} rotas conferidas — plugin efetivo idêntico ao Kong de origem`);
   console.log(`   nenhum plugin global (cada um preso ao projeto que o declarou)`);
 }

@@ -81,6 +81,75 @@ const PENDENTES = {
     "sigma-payments ainda nao foi migrado para o cluster",
 };
 
+// ---------------------------------------------------------------------------
+// 🐞 SERVIÇO CUJO DESTINO DEPENDE DO HOST
+// ---------------------------------------------------------------------------
+// `plataforma-web` atende DOIS domínios apontando para um destino só. Isso era
+// verdade quando havia um app: `opuschat` era o nome de produto e `cafe-api` o
+// histórico, ambos servidos pelo mesmo processo.
+//
+// Não é mais. Hoje são dois Deployments, de dois repositórios, com IMAGENS
+// diferentes:
+//
+//     opuschat/opuschat-app       localhost:32000/opuschat:...
+//     plataforma/plataforma-app   localhost:32000/plataforma:...
+//
+// ⚠️ Traduzir os dois hosts para `plataforma-app` faria o Kong servir o produto
+// ERRADO em `opuschat.cursodetecnologia.dev.br`. E os dois respondem 200 — ou
+// seja, toda conferência por código HTTP passaria, inclusive a do estágio
+// "Verificar rotas". O sintoma seria "o site do OpusChat virou outro site",
+// sem um único erro em lugar nenhum.
+//
+// Aqui o host é PARTIDO para fora: ganha uma cópia de cada serviço que o
+// atende, com as mesmas rotas e os mesmos plugins, apontando para o seu
+// Deployment.
+//
+// 🐞 A primeira versão indexava por SERVIÇO (`plataforma-web`) e só partia
+// aquele. A conferência de dono duplo mostrou que o host também aparece em
+// `plataforma-api` e `plataforma-webhooks` — três serviços, e eu tinha tratado
+// um. Os outros dois continuariam entregando o app errado, e como todos
+// respondem 200, nada apontaria para isso. Indexar por HOST não tem como
+// esquecer um serviço: quem procura é o código.
+const PARTIR_POR_HOST = {
+  "opuschat.cursodetecnologia.dev.br": {
+    sufixo: "opuschat",
+    url: "http://opuschat-app.opuschat.svc.cluster.local:8080",
+  },
+};
+
+// ---------------------------------------------------------------------------
+// O QUE FAZER COM HOST QUE O KONG NÃO CONHECE
+// ---------------------------------------------------------------------------
+// O `kong.yml` cobre seis projetos. O cluster atende mais que isso — veltrixa
+// (três domínios), sprinklegames (dois), `sigma-midia-arquivos`, `sonar.hmg` —
+// por Ingress do Traefik, sem passar por gateway nenhum.
+//
+// ⚠️ Sem esta rota, pôr o Kong na entrada devolveria 404 nesses domínios: eles
+// não sumiriam do cluster, só deixariam de ter quem os encaminhasse. Seis
+// domínios de pé viram seis fora do ar de uma vez.
+//
+// A rota é a MENOS específica possível (sem `hosts`, caminho `/`), então
+// qualquer rota declarada ganha dela — e quem não é declarado continua sendo
+// atendido exatamente como hoje, pelo Traefik.
+//
+// Ela NÃO leva plugin de propósito: é passagem, não porta. `cors` sem lista de
+// origens aqui liberaria `*` para todo domínio que caísse neste caminho.
+const RESERVA = {
+  name: "traefik-reserva",
+  url: "http://traefik.kube-system.svc.cluster.local:80",
+  retries: 0,
+  routes: [
+    {
+      name: "traefik-reserva-tudo",
+      paths: ["/"],
+      strip_path: false,
+      // ⚠️ obrigatório: o Traefik roteia POR HOST. Sem preservar, ele receberia
+      // `Host: traefik.kube-system...` e devolveria 404 em tudo.
+      preserve_host: true,
+    },
+  ],
+};
+
 const doc = YAML.parse(readFileSync(ORIGEM, "utf8"));
 
 let trocados = 0;
@@ -106,6 +175,57 @@ if (naoMapeados.size) {
   process.exit(1);
 }
 
+// --- partir os hosts cujo destino no cluster é outro -----------------------
+const partidos = [];
+for (const [host, destino] of Object.entries(PARTIR_POR_HOST)) {
+  // Varre TODOS os serviços: o host pode ser atendido por vários.
+  const donos = (doc.services ?? []).filter((s) =>
+    (s.routes ?? []).some((r) => (r.hosts ?? []).includes(host)));
+
+  if (!donos.length) {
+    console.error(`✗ PARTIR_POR_HOST cita "${host}", que nenhuma rota atende`);
+    console.error("  O kong.yml mudou de forma. Conferir antes de publicar.");
+    process.exit(1);
+  }
+
+  const copias = [];
+  for (const servico of donos) {
+    // A cópia leva as MESMAS rotas e os MESMOS plugins — só muda o destino e o
+    // conjunto de hosts. Nome de rota e de service sao unicos no Kong, dai o
+    // sufixo: repetir nome faz o Kong recusar a configuracao inteira na partida.
+    const copia = JSON.parse(JSON.stringify(servico));
+    copia.name = `${servico.name}-${destino.sufixo}`;
+    copia.url = destino.url;
+    copia.routes = (servico.routes ?? [])
+      .filter((r) => (r.hosts ?? []).includes(host))
+      .map((r) => {
+        const rc = JSON.parse(JSON.stringify(r));
+        rc.name = `${r.name}-${destino.sufixo}`;
+        rc.hosts = [host];
+        return rc;
+      });
+    copias.push(copia);
+    partidos.push({ de: servico.name, para: copia.name, host, url: destino.url });
+
+    // E o host sai do serviço original: deixar nos dois faz o Kong escolher um
+    // deles por ordem de carga — e a escolha muda entre partidas.
+    servico.routes = (servico.routes ?? [])
+      .map((r) => {
+        if (!(r.hosts ?? []).includes(host)) return r;
+        r.hosts = r.hosts.filter((h) => h !== host);
+        return r;
+      })
+      .filter((r) => (r.hosts ?? []).length > 0);
+  }
+  doc.services.push(...copias);
+}
+
+// Serviço que ficou sem rota nenhuma não tem mais o que fazer.
+doc.services = (doc.services ?? []).filter((s) => (s.routes ?? []).length > 0);
+
+// --- a rota de reserva, sempre por último ----------------------------------
+doc.services.push(JSON.parse(JSON.stringify(RESERVA)));
+
 const cabecalho = [
   "# GERADO por vm/gerar-kong-vm.mjs a partir de ../kong/kong.yml — NAO editar.",
   "#",
@@ -122,6 +242,11 @@ writeFileSync(DESTINO, cabecalho + YAML.stringify(doc), "utf8");
 
 console.log("✅ vm/kong.yml gerado");
 console.log(`   ${trocados} destinos traduzidos para Services do cluster`);
+for (const p of partidos) {
+  console.log(`   ↪ ${p.host} saiu de "${p.de}" e foi para "${p.para}"`);
+  console.log(`       ${p.url}`);
+}
+console.log(`   ↪ reserva: host nao declarado segue para o Traefik (${RESERVA.url})`);
 for (const u of pendentesVistos) {
   console.log(`   ⚠️  ${u}`);
   console.log(`       ${PENDENTES[u]} — as rotas dele vao dar 502 ate a migracao`);
@@ -129,11 +254,50 @@ for (const u of pendentesVistos) {
 
 // Conferencia final. Falhar aqui e melhor que falhar no corte.
 const relido = YAML.parse(readFileSync(DESTINO, "utf8"));
+const PERMITIDOS = new Set([
+  ...Object.values(MAPA),
+  RESERVA.url,
+  ...partidos.map((p) => p.url),
+]);
 let erros = 0;
 for (const s of relido.services ?? []) {
   if (!s.url) continue;
-  const ok = Object.values(MAPA).includes(s.url) || s.url in PENDENTES;
+  const ok = PERMITIDOS.has(s.url) || s.url in PENDENTES;
   if (!ok) { console.error(`   ✗ service ${s.name} ficou com destino ${s.url}`); erros++; }
 }
+
+// Nome repetido faz o Kong recusar a configuracao INTEIRA na partida, e a
+// mensagem fala do nome — nao de qual dos dois esta sobrando.
+//
+// ⚠️ Service e route sao ESPACOS SEPARADOS: existe service `central-saude` com
+// rota `central-saude`, e isso e valido. Conferir os dois juntos reprovava
+// configuracao boa — foi o que a primeira versao desta guarda fez.
+for (const [tipo, nomes] of [
+  ["service", (relido.services ?? []).map((s) => s.name)],
+  ["route", (relido.services ?? []).flatMap((s) => (s.routes ?? []).map((r) => r.name))],
+]) {
+  const vistos = new Set();
+  for (const nome of nomes) {
+    if (!nome) continue;
+    if (vistos.has(nome)) { console.error(`   ✗ ${tipo} com nome repetido: ${nome}`); erros++; }
+    vistos.add(nome);
+  }
+}
+
+// ⚠️ O host partido só pode aparecer nas CÓPIAS. Se ficou também no serviço de
+// origem, o Kong tem dois candidatos para a mesma requisição e escolhe por
+// ordem de carga — o domínio passa a servir um app ou outro conforme a partida.
+for (const host of Object.keys(PARTIR_POR_HOST)) {
+  const permitidos = new Set(partidos.filter((p) => p.host === host).map((p) => p.para));
+  const estranhos = (relido.services ?? [])
+    .filter((s) => (s.routes ?? []).some((r) => (r.hosts ?? []).includes(host)))
+    .map((s) => s.name)
+    .filter((n) => !permitidos.has(n));
+  if (estranhos.length) {
+    console.error(`   ✗ ${host} ainda aparece em: ${estranhos.join(", ")}`);
+    erros++;
+  }
+}
+
 if (erros) { console.error(`   ${erros} problema(s) — NAO use este arquivo`); process.exit(1); }
-console.log("   conferido: YAML valido, todo destino aponta para o cluster");
+console.log("   conferido: YAML valido, destinos no cluster, nomes unicos, hosts sem dono duplo");

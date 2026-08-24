@@ -84,6 +84,33 @@ spec:
               # `config.yml` do túnel não precisar mudar no dia do corte. Um
               # arquivo a menos para errar sob pressão.
               hostPort: 8050
+
+            # ⚠️ A MESMA porta do contêiner publicada TAMBÉM na 80 do nó, e não
+            # é redundância.
+            #
+            # Na estação WSL2 o caminho é
+            #
+            #     cloudflared (Windows) -> 127.0.0.1:8050 -> portproxy -> <distro>:80
+            #
+            # e quem manda no `portproxy` é o `netsh`, que exige Administrador.
+            # Sem elevação ele FALHA EM SILÊNCIO: devolve 0 e não muda a tabela.
+            # Então, em vez de depender de um privilégio que nem sempre há, o
+            # Kong ocupa a porta que o encaminhamento já usa.
+            #
+            # Quem ocupava a 80 era o `svclb` do Traefik. Ele a soltou quando o
+            # Service `traefik` virou `ClusterIP` — o Traefik continua roteando
+            # os Ingress, agora chamado pelo Kong, pela rota de reserva.
+            # Ver `estacao/prd-wsl/kong-assume-a-entrada.sh`.
+            #
+            # 🐞 Esta entrada foi acrescentada ao Deployment por `kubectl patch`
+            # antes de existir aqui. Ela sobreviveu a dois `apply` por acidente:
+            # a lista de portas é mesclada pela chave `containerPort`, e as duas
+            # entradas têm 8000. Bastaria mudar a porta do contêiner para o
+            # `apply` apagar a 80 em silêncio e derrubar tudo.
+            - name: proxy80
+              containerPort: 8000
+              hostPort: 80
+
             - name: status
               containerPort: 8100
 
