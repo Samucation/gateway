@@ -671,9 +671,20 @@ for p in PROJETOS:
 
                         # Se for indice, SEGUE ate o manifesto da plataforma. O
                         # que interessa nao e o formato: e se da para BAIXAR.
+                        #
+                        # 🐞 `jq`, e nao recorte de texto. A primeira versao
+                        # cortava o JSON por virgula e pegava as 3 linhas DEPOIS
+                        # de `"os":"linux"` -- so que o `digest` vem ANTES da
+                        # `platform`, entao a busca voltava vazia SEMPRE. Aqui
+                        # passava assim mesmo por causa da linha de recurso
+                        # abaixo, que pega o primeiro digest do indice; o mesmo
+                        # trecho copiado a mao no Jenkinsfile do `system-api`
+                        # nao tinha recurso, e reprovava quatro imagens boas.
+                        #
+                        # ⚠️ Guarda que passa por causa do plano B esconde que o
+                        # plano A nunca funcionou.
                         if echo "$M" | grep -q '"manifests"'; then
-                            D=$(echo "$M" | tr ',' '
-' | grep -A 3 'linux' | grep -oE 'sha256:[0-9a-f]{64}' | head -1)
+                            D=$(echo "$M" | jq -r '.manifests[]? | select(.platform.os == "linux") | .digest' 2>/dev/null | head -1)
                             [ -n "$D" ] || D=$(echo "$M" | grep -oE 'sha256:[0-9a-f]{64}' | head -1)
                             if [ -z "$D" ]; then
                                 echo "    FALHA $1:$TAG -- indice sem nenhum filho"
