@@ -894,7 +894,21 @@ FIM
 
                     for pasta in %(pastas)s; do
                         echo "==> testando $pasta"
-                        docker run --rm -v "$PWD:/app" -w "/app/$pasta" %(tag)s sh -c "dart pub get && dart test --reporter=expanded"
+                        # 🐞 `--net host` NAO e otimizacao: sem ele o conteiner
+                        # nem sobe.
+                        #
+                        # O `nerdctl` monta a rede do conteiner por CNI, com
+                        # configuracao propria -- e ela colide com a que o k3s
+                        # ja mantem na mesma maquina. O erro sai assim:
+                        #
+                        #   failed to create shim task: OCI runtime create
+                        #   failed: error running createRuntime hook #0
+                        #
+                        # ...que parece runtime quebrado ou imagem corrompida,
+                        # e e conflito de rede. Os testes nao precisam de rede
+                        # isolada, entao usam a do proprio no -- que e o que os
+                        # outros estagios (Sonar, Maven) ja faziam.
+                        docker run --rm --net host -v "$PWD:/app" -w "/app/$pasta" %(tag)s sh -c "dart pub get && dart test --reporter=expanded"
                     done
                 '''
             }
