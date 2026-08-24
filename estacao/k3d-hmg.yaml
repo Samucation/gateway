@@ -94,14 +94,45 @@ registries:
   # ⚠️ Isto é REMENDO, não conserto. O conserto é reserva de DHCP no roteador
   # (ou IP fixo na VM) — ver `gateway/vm/IP-OSCILANDO.md`. Enquanto o endereço
   # oscilar, esta lista é o que segura.
+  #
+  # ---------------------------------------------------------------------------
+  # 🐞 24/08/2026: OS ENDEREÇOS ACIMA ERAM DA VM, QUE NÃO EXISTE MAIS.
+  # ---------------------------------------------------------------------------
+  # A VM `serverhomol` foi desligada em 23/08 e a produção passou para o k3s da
+  # distro WSL2. O espelho continuou apontando para os quatro IPs dela: a
+  # homologação não conseguia baixar NENHUMA imagem nova.
+  #
+  # ⚠️ E não aparecia. Os 47 Pods de hmg seguiam no ar com as imagens que já
+  # estavam no nó — o defeito só se manifestaria na próxima implantação, que
+  # também não acontecia, porque as etapas de homologação estavam desligadas
+  # por outra guarda. Dois defeitos se escondendo um atrás do outro.
+  #
+  # ---------------------------------------------------------------------------
+  # POR QUE UM REGISTRO SÓ PARA A HOMOLOGAÇÃO
+  # ---------------------------------------------------------------------------
+  # O registro da produção vive DENTRO da distro WSL2, e contêiner do Docker
+  # não tem rota até lá — medido: `ping` da distro a partir de um contêiner
+  # perde 100% dos pacotes, e a porta 32000 nem responde. As duas distros do
+  # WSL só se encontram através do host Windows.
+  #
+  # Então a homologação ganhou o seu, em Docker, publicado na 32001 — que é
+  # endereço que os DOIS lados alcançam:
+  #
+  #     a distro empurra  ->  192.168.15.9:32001   (porta publicada pelo Docker)
+  #     o k3d baixa       ->  host.docker.internal:32001
+  #
+  # ⚠️ Os dados ficam em `G:\docker-registro-hmg`, e não em volume do Docker: o
+  # `C:` já chegou a 0 GB nesta máquina e derrubou tudo. O `G:` tem folga.
+  #
+  # `host.docker.internal` primeiro DE PROPÓSITO: é nome, não número, e sobrevive
+  # à troca de IP da estação — que ainda não tem reserva de DHCP. O IP fica de
+  # reserva para o caso de o nome não resolver.
   config: |
     mirrors:
       "localhost:32000":
         endpoint:
-          - "http://192.168.15.56:32000"
-          - "http://192.168.15.55:32000"
-          - "http://192.168.15.54:32000"
-          - "http://192.168.15.57:32000"
+          - "http://host.docker.internal:32001"
+          - "http://192.168.15.9:32001"
 
 options:
   k3s:

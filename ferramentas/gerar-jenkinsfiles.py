@@ -613,11 +613,40 @@ for p in PROJETOS:
 
     pushes = '\n'.join("                    docker push $REGISTRO/%s:$TAG" % n
                        for n, _ in p['imagens'])
+
+    # A MESMA imagem, tambem no registro da HOMOLOGACAO.
+    #
+    # 🐞 O registro da producao vive DENTRO da distro WSL2, e contêiner do Docker
+    # nao tem rota ate la -- medido: de um contêiner, `ping` na distro perde 100%
+    # dos pacotes. O k3d da homologacao nunca conseguiria baixar de la.
+    #
+    # ⚠️ E isso nao aparecia como erro: os Pods de hmg seguiam no ar com as
+    # imagens antigas que ja estavam no no. O sintoma so viria na proxima
+    # implantacao -- que tambem nao acontecia, porque as etapas de homologacao
+    # estavam desligadas. Um defeito escondido atras do outro.
+    #
+    # O ponto de encontro entre as duas distros e uma porta publicada pelo
+    # Docker no host Windows: o registro de hmg esta na 32001.
+    #
+    # Sem `REGISTRO_HMG` definida, nao empurra e nao falha -- mesma logica do
+    # `HMG_CONTEXTO`: ambiente que nao existe nao reprova build.
+    pushes_hmg = '\n'.join(
+        "                        docker tag $REGISTRO/{n}:$TAG $REGISTRO_HMG/{n}:$TAG\n"
+        "                        docker push $REGISTRO_HMG/{n}:$TAG".format(n=n)
+        for n, _ in p['imagens'])
     # `|| falhou=1`, e nao `conferir` solto: com `set -e` a primeira falha
     # abortaria o estagio, e as imagens seguintes nunca seriam conferidas. Quem
     # esta consertando quer ver a lista INTEIRA de uma vez.
     conferencias = '\n'.join("                    conferir %s || falhou=1" % n
                              for n, _ in p['imagens'])
+
+    # A mesma pergunta, feita ao registro de homologacao.
+    conferencias_hmg = '\n'.join(
+        '                        curl -sf -o /dev/null -H "Accept: $A" '
+        '"http://$REGISTRO_HMG/v2/{n}/manifests/$TAG" '
+        '&& echo "    ok  {n}:$TAG" '
+        '|| {{ echo "    FALHA {n}:$TAG nao chegou na homologacao"; exit 1; }}'.format(n=n)
+        for n, _ in p['imagens'])
     partes.append("""
         stage('Publicar') {
             steps {
@@ -713,10 +742,31 @@ for p in PROJETOS:
                     falhou=0
 %s
                     [ "$falhou" = "0" ] || { echo "publicacao nao confere"; exit 1; }
+
+                    # ---- a mesma imagem, no registro da HOMOLOGACAO ---------
+                    #
+                    # O k3d de homologacao roda em Docker e NAO alcanca o
+                    # registro da producao, que vive dentro da distro WSL2 (de
+                    # um conteiner, `ping` na distro perde 100%% dos pacotes).
+                    # O encontro possivel e uma porta publicada pelo Docker.
+                    #
+                    # Sem `REGISTRO_HMG`, nao empurra e nao reprova: ambiente
+                    # que nao existe nao derruba build.
+                    if [ -n "$REGISTRO_HMG" ]; then
+                        echo "==> espelhando para a homologacao ($REGISTRO_HMG):"
+%s
+                        # ⚠️ Conferir do lado de LA tambem. `docker push` sair
+                        # com zero ja mentiu antes -- foi assim que 12 de 13
+                        # imagens de producao ficaram inbaixaveis com a esteira
+                        # verde. Aqui a pergunta e feita ao registro de hmg.
+%s
+                    else
+                        echo "==> REGISTRO_HMG vazio: homologacao sem registro, nada espelhado"
+                    fi
                 '''
             }
         }
-""" % (pushes, conferencias))
+""" % (pushes, conferencias, pushes_hmg, conferencias_hmg))
 
     esperas = '\n'.join(
         '                    $KUBECTL_HMG rollout status -n $NS deploy/%s --timeout=600s' % d
