@@ -1,105 +1,248 @@
-# O túnel de PRODUÇÃO, rodando na VM.
-#
-# ===========================================================================
-# ⚠️ ESTE É O TÚNEL DA ESTAÇÃO (47a05dc3), QUE MUDOU DE MÁQUINA
-# ===========================================================================
-# Não é um túnel novo, e isso é o ponto: todos os CNAME já apontam para este ID,
-# inclusive os das zonas `urupix.com.br` e `sprinklegames.com.br`, que o
-# `cloudflared` daqui NÃO consegue editar (o `cert.pem` só alcança
-# `cursodetecnologia.dev.br` — tentar criar a rota gerou
-# `urupix.com.br.cursodetecnologia.dev.br`, um subdomínio concatenado e inútil).
-#
-# Movendo o túnel em vez do DNS, nenhum registro precisa mudar.
-#
-# ⚠️ O SERVIÇO DA ESTAÇÃO TEM QUE ESTAR PARADO. Um túnel Cloudflare é um ID, e o
-# mesmo ID em duas máquinas vira RÉPLICA: a Cloudflare divide o tráfego entre as
-# instâncias, por desenho. Nada daria erro — cada metade das requisições falaria
-# com um banco diferente. Numa doação PIX, metade dos pagamentos cairia de cada
-# lado.
-#
-# ===========================================================================
-# O QUE MORA AQUI E O QUE AINDA MORA NA ESTAÇÃO
-# ===========================================================================
-# Migrado (serve do cluster, e sobrevive à estação desligada):
-#   urupix, sigma-midia, sprinklegames, opuschat, cafe-api, central-ia,
-#   veltrixa/ninjasystem, sigma-financeiro
-#
-# ⚠️ NAO migrado (o tunel devolve para a estacao pela rede local): quiz, api,
-# e o sigma-financeiro-SANDBOX (o de producao ja migrou).
-#
-# Esses continuam funcionando enquanto a estação estiver ligada, e SÓ esses caem
-# quando ela for desligada — o que é o comportamento desejado: cada um migra
-# quando seus dados forem copiados.
-#
-# ⚠️ `192.168.15.9` é o endereço da estação na rede local. Ele NÃO está em DHCP
-# reservado; se mudar, estas rotas quebram. É a mesma dívida da VM.
+# Cloudflare Tunnel â€” NerdQuiz (recriado 2026-07-06 pÃ³s-formataÃ§Ã£o)
+# 1 tÃºnel, 2 ingress rules: front (3000) e API (3333) rodando em Docker neste PC.
 tunnel: 47a05dc3-c2d1-4801-bf63-d4cf4bc7a76b
-credentials-file: /etc/cloudflared/47a05dc3-c2d1-4801-bf63-d4cf4bc7a76b.json
-
-originRequest:
-  connectTimeout: 30s
-  noHappyEyeballs: true
+credentials-file: C:\Users\samue\.cloudflared\47a05dc3-c2d1-4801-bf63-d4cf4bc7a76b.json
 
 ingress:
-  # ---- JENKINS (nginx local da VM, fora do Traefik) ----------------------
-  - hostname: jenkins.cursodetecnologia.dev.br
-    service: http://127.0.0.1:8081
-
-  # ---- MIGRADO: servido pelo Traefik do cluster --------------------------
-  #
-  # ⚠️ Sem `httpHostHeader`: quem escolhe o serviço é o Traefik, pelo Host
-  # original. Sobrescrever faria ele procurar uma regra que não existe e
-  # devolver 404 com a aplicação de pé.
-  - hostname: urupix.com.br
-    service: http://127.0.0.1:80
-  - hostname: www.urupix.com.br
-    service: http://127.0.0.1:80
-  - hostname: urupix.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-  - hostname: sigma-midia.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-  - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-
-  # ---- AINDA NA ESTAÇÃO: devolve pela rede local -------------------------
-  #
-  # ⚠️ Aqui o `httpHostHeader` É NECESSÁRIO, ao contrário do bloco acima: quem
-  # recebe do outro lado é o Kong da estação (8050), que também roteia por Host.
-  # A porta 8050 é o gateway único; 3000/3333 são o NerdQuiz, que não passa por
-  # ele.
   - hostname: quiz.cursodetecnologia.dev.br
-    service: http://192.168.15.9:3000
+    service: http://localhost:3000
   - hostname: api.cursodetecnologia.dev.br
-    service: http://192.168.15.9:3333
-
-  - hostname: sprinklegames.com.br
-    service: http://127.0.0.1:80
-  - hostname: www.sprinklegames.com.br
-    service: http://127.0.0.1:80
-
+    service: http://localhost:3333
+  # ⚠️ Entram pelo GATEWAY UNICO (8050) desde 14/08/2026 — o liveflow-kong local
+  # foi removido. O httpHostHeader abaixo e o que faz o gateway saber QUAL
+  # projeto atender: sem ele os tres dominios chegariam sem Host e cairiam em 404.
+  # LiveFlow / Urupix â€” app Next.js na porta 3100 (dedicada p/ nao colidir com o quiz na 3000)
+  # httpHostHeader: preserva o dominio original p/ o app (Auth.js/overlays montam URL certa)
+  - hostname: urupix.cursodetecnologia.dev.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: urupix.cursodetecnologia.dev.br
+  # urupix.com.br â€” dominio proprio (adicionado 2026-07-22). Serve o MESMO app
+  # (3100), em paralelo ao dominio antigo (que continua intacto).
+  - hostname: urupix.com.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: urupix.com.br
+  - hostname: www.urupix.com.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: www.urupix.com.br
+  # CafÃ© Mini ERP â€” servidor Telegram na porta 8080
+  # Entra pelo GATEWAY UNICO (8050). A 8080 estava morta desde que o Kong deste
+  # projeto passou a servir na 8020 -- por isso o dominio devolvia 502.
+  # As rotas de operacao (/painel, /v1/platform) NAO respondem por este dominio.
   - hostname: cafe-api.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
+    service: http://localhost:8050
+  # Sigma Financeiro - servico de adquirencia (repo sigma-financeiro).
+  # Entra pelo KONG (8010), NAO pelo app (3200): e o gateway que faz correlacao
+  # de requisicao, rate-limit de borda e metricas. Apontar direto para o app
+  # funcionaria e jogaria essa camada fora sem ninguem perceber.
+  # Entra pelo GATEWAY UNICO (8050) desde 14/08/2026 -- o sigma-kong local foi
+  # removido. O gateway separa os projetos pelo cabecalho Host.
+  # /api/cron nao responde por este dominio: so pelo apelido sigma.interno.
   - hostname: sigma-financeiro.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: sigma-financeiro.cursodetecnologia.dev.br
+  # Sigma Financeiro - SANDBOX. Vai DIRETO no app (3201); producao entra pelo
+  # Kong (8010). Um segundo Kong custaria memoria nesta maquina para exercitar
+  # uma camada que nao muda entre ambientes. Ver docs/ambientes.md do repo.
   - hostname: sigma-financeiro-sandbox.cursodetecnologia.dev.br
-    service: http://192.168.15.9:3201
+    service: http://localhost:3201
     originRequest:
       httpHostHeader: sigma-financeiro-sandbox.cursodetecnologia.dev.br
-  - hostname: opuschat.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-  - hostname: central-ia.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-
+  # Veltrixa Ecommerce - LOJA publica (storefront, porta 4201).
+  # Autorizado pelo Samuel em 2026-08-07.
+  # Registrado em system-api/docs/exposicao-publica.md (regra R17).
+  #
+  # SO a loja. Painel e Keycloak NAO estao publicados. O nginx da imagem
+  # do storefront faz proxy apenas de /api/public/ e devolve 404 no resto
+  # da API - carrinho, pedido, pagamento, painel e Swagger ficam de fora.
   - hostname: ninjasystem.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
+    service: http://localhost:4201
+    originRequest:
+      httpHostHeader: ninjasystem.cursodetecnologia.dev.br
+  # veltrixa.cursodetecnologia.dev.br - o MESMO storefront (4201), com o nome do
+  # produto. Autorizado pelo Samuel em 2026-08-08. O `ninjasystem` continua
+  # valendo em paralelo: derrubar um endereco que ja esta no ar quebraria
+  # qualquer link compartilhado, e nao custa nada manter os dois.
+  #
+  # Continua sendo SO A LOJA: o nginx do storefront so passa /api/public/ e
+  # devolve 404 no resto. Painel, Keycloak e API direta seguem fora.
+  # ⚠️ 8050, e nao 4201: a 4201 era o conteiner do storefront no Docker.
+  # Com a producao no k3s, quem serve este nome e o Ingress do cluster --
+  # e a 8050 e a porta que o Windows encaminha para o Traefik de la.
   - hostname: veltrixa.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-  - hostname: ninjasystem-admin.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
-  # ⚠️ As tres regras de caminho sairam: quem restringe agora e o Ingress do
-  # cluster, que expoe so o Keycloak nesse host. Manter a divisao aqui seria uma
-  # segunda lista para esquecer de atualizar.
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: veltrixa.cursodetecnologia.dev.br
+  # Keycloak do Veltrixa (loja ninjasystem). Publicado em 2026-08-08,
+  # autorizado pelo Samuel, para o vendedor Luiz conseguir logar e fechar
+  # pedido de fora. Registrado em system-api/docs/exposicao-publica.md (R17).
+  #
+  # ALLOWLIST DE PATH. Um Keycloak inteiro na internet entrega o console de
+  # admin e o realm master junto; aqui so o realm da loja e os estaticos da
+  # tela de login atravessam, o resto morre na BORDA, antes do Keycloak.
+  # O console de admin continua no localhost via KC_HOSTNAME_ADMIN.
   - hostname: ninjasystem-auth.cursodetecnologia.dev.br
-    service: http://127.0.0.1:80
+    path: ^/realms/veltrixa(/.*)?$
+    service: http://localhost:8085
+    originRequest:
+      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
+  # CSS/JS da tela de login do Keycloak. Sem isto a pagina abre sem estilo.
+  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
+    path: ^/resources/.*
+    service: http://localhost:8085
+    originRequest:
+      httpHostHeader: ninjasystem-auth.cursodetecnologia.dev.br
+  # Qualquer outra coisa neste hostname: /admin/, /realms/master/, metricas.
+  - hostname: ninjasystem-auth.cursodetecnologia.dev.br
+    service: http_status:404
 
+  # Painel administrativo do Veltrixa (veltrixa-frontend, 4201->4200).
+  # Publicado em 2026-08-09, autorizado pelo Samuel, para o vendedor Luiz
+  # administrar a demo-store (adquirencias e campanhas) de fora.
+  # Registrado em system-api/docs/exposicao-publica.md (R17).
+  #
+  # O corte do que ele NAO alcanca e feito no nginx da propria imagem
+  # (/api/platform/, swagger e actuator devolvem 404 la), e nao aqui: o
+  # painel precisa da API de administracao da empresa quase inteira, entao
+  # a lista de bloqueio vive junto com quem conhece as rotas.
+  - hostname: ninjasystem-admin.cursodetecnologia.dev.br
+    service: http://localhost:4200
+    originRequest:
+      httpHostHeader: ninjasystem-admin.cursodetecnologia.dev.br
+
+  # OpusChat - plataforma de atendimento por Telegram e WhatsApp
+  # (repo cafe-mobile-erp). Publicado em 2026-08-09, autorizado pelo Samuel,
+  # para o bot de atendimento da propria plataforma receber os updates do
+  # Telegram - que exige webhook em HTTPS publico e recusa localhost.
+  #
+  # Entra pelo KONG (8020), NAO pelo app (8080), pelo mesmo motivo do
+  # sigma-financeiro acima: e o gateway que faz correlacao de requisicao,
+  # teto por IP, CORS e as metricas. Apontar direto para o app funcionaria e
+  # jogaria essa camada fora sem ninguem perceber.
+  #
+  # O que fica exposto: o site, os dois portais, a documentacao, a API de
+  # mensageria e o webhook dos provedores. O /v1/platform (operacao, enxerga
+  # TODOS os clientes) NAO abre de fora: o Kong tem lista de IP nele e
+  # responde 404 para quem vem da internet.
+  # 🐞 Apontava para a 8020 — o Kong LOCAL do OpusChat, removido na migracao
+  # para o gateway unico. Ninguem escutava nessa porta, o tunel entregava no
+  # vazio e o Cloudflare devolvia 502. Os vizinhos ja tinham sido migrados
+  # para a 8050; este ficou para tras.
+  - hostname: opuschat.cursodetecnologia.dev.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: opuschat.cursodetecnologia.dev.br
+
+  # Central de IA - o gateway que administra a GPU desta casa
+  # (repos central-ia + central-ia-portal). PRONTO, aguardando o Samuel criar
+  # os registros DNS no painel da Cloudflare.
+  #
+  # Entra pelo KONG (8030), NAO pelo portal (3301) nem pelo motor (3300), pelo
+  # mesmo motivo do sigma-financeiro e do OpusChat acima: e o gateway que faz
+  # correlacao, teto por chave e metricas. Apontar direto jogaria essa camada
+  # fora sem ninguem perceber.
+  #
+  # UM NIVEL SO de subdominio, com hifen no sandbox. O SSL grátis da Cloudflare
+  # cobre *.cursodetecnologia.dev.br e NAO cobre a.b.cursodetecnologia...;
+  # dois niveis exigiriam o Advanced Certificate Manager (~US$ 10/mes). O
+  # sintoma de errar nao e um erro claro: e certificado invalido no navegador
+  # e alguem concluindo que "o sandbox quebrou".
+  #
+  # O /admin do MOTOR nao esta exposto em lugar nenhum (nem no kong.yml dele):
+  # quem fala com ele e o portal, pela rede interna do compose.
+  # 8050, e nao 8030: o Kong PROPRIO do central-ia foi aposentado na
+  # consolidacao de 14/08/2026 -- cinco Kongs viraram um so, o do projeto
+  # `gateway`. A porta antiga nao e escutada por ninguem, e o sintoma era
+  # 502 com todos os conteineres saudaveis.
+  - hostname: central-ia.cursodetecnologia.dev.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: central-ia.cursodetecnologia.dev.br
+
+  # Sandbox: HOJE aponta para o MESMO Kong, porque so existe uma instalacao.
+  # Quando houver um ambiente separado de verdade, troque a porta aqui - e
+  # lembre que o ambiente e carimbado DENTRO do banco: o portal recusa subir
+  # se a variavel discordar do carimbo.
+  - hostname: central-ia-sandbox.cursodetecnologia.dev.br
+    service: http://localhost:8030
+    originRequest:
+      httpHostHeader: central-ia-sandbox.cursodetecnologia.dev.br
+
+  # sigma-midia - armazenamento de arquivos agnostico de aplicacao.
+  # Publicado em 17/08/2026, pedido pelo Samuel.
+  #
+  # Entra pelo GATEWAY UNICO (8050), como os demais: e o gateway que faz
+  # correlacao, teto por IP e metricas. Apontar direto para o nginx do portal
+  # (4400) funcionaria e jogaria essa camada fora sem ninguem perceber.
+  #
+  # O que responde por este dominio: as paginas do portal, /api/portal
+  # (cadastro publico) e /api/admin (operacao, com teto apertado). A API das
+  # aplicacoes (/api/v1) tambem, autenticada por X-Api-Key.
+  #
+  # ⚠️ O BYTE DO ARQUIVO NAO PASSA POR AQUI. O servico devolve URL assinada e o
+  # cliente faz o PUT direto no motor de objetos. Enquanto o motor nao tiver
+  # endereco publico proprio, so da para enviar de dentro da maquina.
+  #
+  # UM NIVEL SO de subdominio: o SSL gratis da Cloudflare cobre
+  # *.cursodetecnologia.dev.br e nao cobre a.b.cursodetecnologia...
+  - hostname: sigma-midia.cursodetecnologia.dev.br
+    service: http://localhost:8050
+    originRequest:
+      httpHostHeader: sigma-midia.cursodetecnologia.dev.br
+
+  # sigma-midia - o hostname de DADOS. Aqui passam os BYTES.
+  #
+  # No plano dos "dois hostnames, como o S3": o de cima e o de CONTROLE (portal
+  # e API); este e o de dados. Nele moram dois destinos, separados por PREFIXO
+  # de caminho -- por isso sao duas regras, e a ORDEM importa (vence a primeira
+  # que casa).
+  #
+  # ⚠️ NAO passa pelo gateway (8050), de proposito. O Kong desta maquina tem
+  # teto de 1 MB nas rotas do sigma-midia, porque por la so trafega JSON de
+  # controle. Mandar arquivo pelo gateway daria 413 e jogaria fora o desenho
+  # inteiro: o servico existe justamente para o byte NAO passar por ele.
+  #
+  # ⚠️ SEM httpHostHeader reescrito para localhost. O cabecalho Host entra na
+  # assinatura SigV4 do MinIO: se o tunel trocar o cabecalho, TODA URL
+  # assinada passa a dar 403 -- e o erro diria "acesso negado", nao "host
+  # errado".
+  #
+  # Exposicao conferida em 17/08/2026 antes de publicar: sem assinatura o
+  # MinIO devolve 403 em GET, LIST, PUT e DELETE, e o console (9101) nao
+  # responde por esta porta.
+
+  # 1) imagens derivadas (imgproxy). Casa com IMGPROXY_PATH_PREFIX=/img.
+  - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
+    path: ^/img(/.*)?$
+    service: http://localhost:9102
+    originRequest:
+      httpHostHeader: sigma-midia-arquivos.cursodetecnologia.dev.br
+
+  # 2) o resto e o motor de objetos (MinIO), so por URL assinada.
+  - hostname: sigma-midia-arquivos.cursodetecnologia.dev.br
+    service: http://localhost:9100
+    originRequest:
+      httpHostHeader: sigma-midia-arquivos.cursodetecnologia.dev.br
+
+  # Sprinkle Games - portal publico (sprinklegames.com.br), 20/08/2026.
+  # A API serve o site ja compilado na MESMA porta (SERVE_WEB=true), entao
+  # aponta direto pro 4310 e nao passa pelo gateway: uma origem so mantem o
+  # cookie de sessao em SameSite=Lax e tira o CORS do caminho.
+  - hostname: sprinklegames.com.br
+    service: http://localhost:4310
+    originRequest:
+      httpHostHeader: sprinklegames.com.br
+
+  - hostname: www.sprinklegames.com.br
+    service: http://localhost:4310
+    originRequest:
+      httpHostHeader: www.sprinklegames.com.br
+  # Sempre Mais Barato - portal e API na mesma origem.
+  - hostname: sempre-mais-barato.cursodetecnologia.dev.br
+    service: http://localhost:4320
+    originRequest:
+      httpHostHeader: sempre-mais-barato.cursodetecnologia.dev.br
   - service: http_status:404

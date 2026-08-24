@@ -136,11 +136,32 @@ if ($Para -eq 'k3s') {
     Diga "k3s atendendo em $ip (urupix 200)"
 
     Diga '== 2. ligando as portas do Windows a distro =='
-    foreach ($p in 80, 8050) {
-        & netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>&1 | Out-Null
-        & netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p connectaddress=$ip connectport=$p 2>&1 | Out-Null
+    # 🐞 A 8050 APONTA PARA A 80 DA DISTRO, e nao para a 8050.
+    #
+    # A primeira execucao mapeou 8050 -> 8050 e derrubou onze dominios em 502.
+    # O motivo: no Docker, a 8050 era o Kong. No cluster nao ha Kong -- quem
+    # recebe e o Traefik, na porta 80. Do outro lado da 8050 nao havia
+    # ninguem.
+    #
+    # ⚠️ O tunel continua apontando para `localhost:8050`, e e de proposito:
+    # assim o `config.yml` nao precisa mudar, e a volta para o Docker e so
+    # remover o encaminhamento.
+    foreach ($par in @(@(80, 80), @(8050, 80))) {
+        $de = $par[0]; $para = $par[1]
+        & netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$de 2>&1 | Out-Null
+        & netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$de connectaddress=$ip connectport=$para 2>&1 | Out-Null
+        Diga "127.0.0.1:$de -> ${ip}:$para"
     }
-    Diga "127.0.0.1:80 e :8050 -> $ip"
+
+    # ⚠️ O NerdQuiz NAO entra nesta lista, e nunca vai entrar.
+    #
+    # Ele nunca foi migrado para Kubernetes -- nao tem manifesto nenhum, so
+    # `docker-compose.yml`. Continua sendo servido pelo Docker, e parar seus
+    # conteineres derruba `quiz` e `api` sem nada ganhar em troca.
+    #
+    # 🐞 Na primeira execucao eu parei tudo indiscriminadamente e derrubei os
+    # dois dominios junto.
+    $FICAM_NO_DOCKER = 'nerdquiz'
 
     Diga '== 3. congelando a origem =='
     # ⚠️ PARAR ANTES DE COPIAR, e nao depois.
@@ -156,6 +177,7 @@ if ($Para -eq 'k3s') {
     foreach ($c in (& docker ps --format '{{.Names}}' 2>$null)) {
         # Os BANCOS ficam de pe: e deles que a copia final sai.
         if ($c -match 'postgres|db$|-db|redis|minio|kafka|redpanda') { continue }
+        if ($c -match $FICAM_NO_DOCKER) { continue }
         & docker stop $c 2>&1 | Out-Null
     }
     Diga 'aplicacoes do docker paradas (bancos seguem de pe para a copia)'
