@@ -35,9 +35,19 @@ objetivo do arranjo.
 Kubernetes; seguem em Docker. Pará-los derruba esses dois domínios.
 
 ⚠️ **Exceção: a pilha de GPU.** Kokoro, Chatterbox, Whisper e Ollama são
-contêineres Docker soltos — sem manifesto. São o último fio que prende a
-produção ao Docker. O WSL2 repassa CUDA, então cabem no cluster; falta
-escrever os manifestos.
+contêineres Docker soltos — sem manifesto.
+
+Isso **não é regressão**: na VM eles também ficavam de fora, porque o VMware
+não repassa CUDA. Ficar em Docker é a mesma situação de antes.
+
+O que MUDOU é que agora daria para trazê-los: conferido em 24/08/2026, o
+`/dev/dxg` e o `libcuda.so` existem dentro da distro `prd` — o WSL2 repassa a
+GPU. Levá-los para o cluster é o que tornaria a produção **de fato**
+independente do Docker, e exige quatro manifestos novos, acesso a `/dev/dxg`
+nos Pods e migrar os volumes de modelo (o do Ollama sozinho passa de 2 GB).
+
+Enquanto não for feito: **fechar o Docker desliga a voz sintetizada e a
+transcrição**, e o resto da produção continua de pé.
 
 ### O arranjo anterior, para quem precisar da volta
 
