@@ -38,10 +38,15 @@ case "$acao" in
   disparar)
     [ -n "$proj" ] || { echo "  falta o projeto"; exit 2; }
     c=$(crumb)
-    # Job com parametro exige `/buildWithParameters`; sem parametro, `/build`.
-    # Trocar os dois devolve 400 sem dizer o que faltou.
+    # 🐞 Job COM parametro exige `/buildWithParameters`; sem parametro,
+    # `/build`. Trocar os dois devolve 400 -- e o 400 so recusa, nao diz o que
+    # faltou. O `gateway` tem parametro, e era por isso que ele nao disparava.
     cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -X POST \
           -u "$U:$T" -H "$c" "$J/job/$proj/job/main/build")
+    if [ "$cod" = "400" ]; then
+      cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -X POST \
+            -u "$U:$T" -H "$c" "$J/job/$proj/job/main/buildWithParameters")
+    fi
     echo "  $proj -> http $cod"
     ;;
 
