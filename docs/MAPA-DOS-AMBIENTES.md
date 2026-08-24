@@ -19,7 +19,7 @@
 |---|---|---|---|
 | Onde | distro WSL2 `prd` (disco em `G:`) | k3d, dentro do Docker Desktop | Docker Compose |
 | Orquestrador | k3s | k3d (`k3d-hmg`) | — |
-| Entrada | Traefik na porta 80 | Traefik na 8090 | Kong na 8050 |
+| Entrada | **Kong** (Pod, `hostPort` 80 e 8050) | Traefik na 8090 | Kong na 8050 |
 | Como o Windows alcança | `netsh portproxy` → IP da distro | direto | direto |
 | Túnel | serviço `NerdQuizTunnel` (Windows) | serviço `Cloudflared` | — |
 | Registro de imagens | `localhost:32000`, **dentro do k3s** | espelha do prd | — |
@@ -30,6 +30,42 @@
 ⚠️ **O Docker é ambiente de trabalho, não de produção.** Fechá-lo derruba
 homologação e desenvolvimento — e a produção continua de pé. Era esse o
 objetivo do arranjo.
+
+### Como o tráfego entra hoje (24/08/2026)
+
+```
+cloudflared (Windows, serviço NerdQuizTunnel)
+   └─ 127.0.0.1:8050
+        └─ netsh portproxy  →  <IP da distro>:80
+             └─ KONG (Pod em gateway/, hostPort 80 e 8050)
+                  ├─ host declarado  →  Service do projeto, direto
+                  └─ host NÃO declarado  →  Traefik (ClusterIP) → Ingress
+```
+
+Entre 23 e 24/08/2026 o Kong ficou **fora do caminho**: quem atendia era o
+Traefik. Todos os domínios respondiam, e por isso ninguém percebeu o que tinha
+sumido junto — `correlation-id`, teto de requisições, o CORS de cada projeto e
+as métricas do Prometheus. **Gateway que não está no caminho não protege nada,
+e “o site abre” não é evidência de que ele está.**
+
+A prova de que um domínio passa mesmo pelo Kong é o cabeçalho
+`X-Request-Id` na resposta. Sem ele, ou o host não está declarado (caiu na
+reserva) ou o Kong não está na entrada:
+
+```bash
+curl -sI https://urupix.cursodetecnologia.dev.br/ | grep -i x-request-id
+```
+
+Conferência completa, host a host:
+
+```bash
+wsl -d prd -u root -- bash /mnt/e/.../gateway/estacao/prd-wsl/conferir-kong.sh
+```
+
+⚠️ **O Traefik não saiu de cena.** Ele deixou de ocupar a porta 80 do nó
+(virou `ClusterIP`) e passou a ser chamado pelo Kong. Quem não está no
+`kong.yml` — veltrixa, ninjasystem, sprinklegames, `sigma-midia-arquivos`,
+`sonar.hmg` — continua sendo atendido por ele, pela rota de reserva.
 
 ⚠️ **Exceção: o NerdQuiz.** `quiz` e `api` nunca ganharam manifesto de
 Kubernetes; seguem em Docker. Pará-los derruba esses dois domínios.
