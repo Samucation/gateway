@@ -199,18 +199,34 @@ pipeline {{
         // rodando?" -- duas builds do mesmo minuto colidem, e um rollback nao
         // sabe para onde voltar.
         TAG      = "${{env.GIT_COMMIT ? env.GIT_COMMIT.take(12) : 'local'}}"
-        // ⚠️ DOIS `kubectl`, porque agora sao DOIS clusters.
+        // ⚠️ DOIS `kubectl`, porque sao DOIS clusters -- e desde 24/08/2026
+        // nenhum deles e mais o da VM.
         //
-        // `microk8s kubectl` fala SO com o cluster desta VM, que virou
-        // PRODUCAO. Homologacao mora na estacao, num cluster k3d, e so um
-        // kubectl avulso com kubeconfig proprio alcanca de la.
+        // PRODUCAO agora e o k3s da distro WSL2 `prd`, onde o proprio Jenkins
+        // roda: `kubectl` sem `--kubeconfig` ja fala com ele.
         //
-        // 🐞 Usar `microk8s kubectl` para os dois era o que fazia a esteira
+        // HOMOLOGACAO continua sendo o k3d desta estacao, alcancado pelo
+        // kubeconfig proprio. Ele vive DENTRO do Docker Desktop, entao so
+        // responde quando o Docker esta ligado -- o que e coerente com o
+        // arranjo: Docker e o ambiente de desenvolvimento e teste.
+        //
+        // 🐞 Usar o mesmo `kubectl` para os dois era o que fazia a esteira
         // DESFAZER producao: ela aplicava o overlay de homologacao no cluster
         // de producao, e `urupix.com.br` voltava a ser `urupix.hmg`.
-        KUBECTL      = 'microk8s kubectl'
-        KUBECTL_HMG  = '/usr/local/bin/kubectl --kubeconfig=/var/lib/jenkins/.kube/config-hmg'
+        KUBECTL      = 'kubectl'
+        KUBECTL_HMG  = 'kubectl --kubeconfig=/var/lib/jenkins/.kube/config-hmg'
 
+        // ⚠️ `sonar.hmg` CONTINUA, e a tentacao de trocar por nome de Service
+        // ja me pegou uma vez.
+        //
+        // 🐞 Troquei por `sonarqube.sonarqube.svc.cluster.local` achando que
+        // era mais limpo. Nao e: o Jenkins roda como SERVICO DO SISTEMA, fora
+        // do cluster, e DNS de Service so existe para quem esta dentro. O
+        // `getent` na distro confirma: nao resolve.
+        //
+        // O nome vive no `/etc/hosts` da distro apontando para 127.0.0.1, e
+        // quem atende e o Ingress do proprio Sonar pelo Traefik. Mesmo arranjo
+        // da VM -- ele estava certo.
         SONAR_URL   = 'http://sonar.hmg'
         SONAR_CHAVE = '{dir}'
 

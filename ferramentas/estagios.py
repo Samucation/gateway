@@ -293,6 +293,11 @@ SONAR_GENERICO = """
                         # --network host. Sem isto o erro fala de DNS e manda a
                         # pessoa procurar problema de rede que nao existe.
                         #
+                        # 🐞 Em 24/08/2026 eu tirei esta linha, junto com o
+                        # nome `sonar.hmg`, achando que apontar para o Service
+                        # do cluster era mais limpo. Nao e: o Jenkins roda FORA
+                        # do cluster e nao resolve DNS de Service. Voltou tudo.
+                        #
                         # 🐞 E o `-Dsonar.scm.disabled=true` SAIU daqui.
                         #
                         # Com ele o Sonar nao consegue saber o que mudou, e passa
