@@ -11,12 +11,44 @@
 # Ele ficou na 8050 mesmo, e não assumiu a 8000 como se planejou no começo: o
 # túnel aponta para cá pelo hostname, então a porta virou detalhe interno. Mudar
 # para a 8000 só criaria mais uma janela de indisponibilidade sem ganho nenhum.
+#
+# =============================================================================
+# ⛔ APOSENTADO EM 24/08/2026 — NÃO SUBA ISTO.
+# =============================================================================
+# O Kong da produção agora é Pod do k3s (`vm/k8s.yaml`), na distro WSL2 `prd`.
+# Este compose ficou para trás como referência histórica.
+#
+# 🐞 E ele DERRUBOU A PRODUÇÃO em 25/08/2026. O `restart: unless-stopped` fez o
+# Docker ressuscitá-lo sozinho quando a máquina reiniciou, e ele reocupou a
+# porta 8050 — a mesma que o túnel usa. A partir daí:
+#
+#   * o `cloudflared` fala com `http://localhost:8050`;
+#   * `localhost` resolve para IPv6 (`::1`) ANTES de IPv4;
+#   * o `netsh portproxy`, que leva ao Kong do cluster, só escuta IPv4;
+#   * o Docker escutava `[::]:8050` — então TODO o tráfego caía neste Kong,
+#     com a configuração velha, apontando para contêineres que não existem mais.
+#
+# ⚠️ Resultado: quatro domínios em 503 e dois em 404, com o cluster inteiro
+# saudável. E `docker stop` NÃO resolveu — o `com.docker.backend` continuou
+# segurando a porta IPv6 até o contêiner ser REMOVIDO.
+#
+# Se um dia precisar dele de volta, o Kong do cluster tem de sair antes: dois
+# Kongs disputando a 8050 é como o dia 25/08 começou.
+#
+# Ver: gateway/docs/MAPA-DOS-AMBIENTES.md
+# =============================================================================
 
 services:
   kong:
     image: kong:3.8
     container_name: gateway-kong
-    restart: unless-stopped
+    # ⚠️ `no`, e NÃO `unless-stopped`. Ver o bloco acima: a política de reinício
+    # é o que fez este contêiner aposentado voltar sozinho e roubar a porta do
+    # gateway de produção.
+    restart: "no"
+    # `profiles` tira o serviço do `docker compose up` padrão: só sobe com
+    # `--profile aposentado`, que é um ato deliberado e não um descuido.
+    profiles: ["aposentado"]
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yml
