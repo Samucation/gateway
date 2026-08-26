@@ -39,15 +39,43 @@
 # =============================================================================
 
 services:
-  kong:
+  # ⚠️ O NOME É `kong-aposentado`, e isso NÃO é enfeite.
+  #
+  # Em 26/08/2026 este contêiner ressuscitou DUAS vezes em meia hora e derrubou
+  # o cartório para 404 nas duas — apesar do `restart: "no"` e do `profiles`
+  # logo abaixo, que existiam justamente para impedir isso.
+  #
+  # Quem o trazia de volta eram os vigias de outros projetos:
+  #
+  #   live-flow/deploy/windows/watchdog.ps1:214
+  #   sigma-financeiro/deploy/windows/watchdog.ps1:217
+  #
+  # Ambos fazem `Push-Location` NESTA pasta e rodam `docker compose up -d kong`.
+  # E aí está a armadilha: **nomear o serviço explicitamente ignora o
+  # `profiles`**. A trava só vale para o `up` sem argumentos. Quem escreveu o
+  # `profiles` (eu) acreditou que ele barrava qualquer subida — e um mês depois
+  # leu "ele só sobe com --profile" como garantia, sem testar a forma nomeada.
+  #
+  # Pior: o laço se alimenta. O contêiner rouba a `[::]:8050`, o site vai a 404,
+  # o vigia vê o público fora, conclui que o gateway caiu e o recria de novo.
+  #
+  # Com o serviço chamando-se `kong-aposentado`, aquele comando responde
+  # "no such service: kong" e não faz nada. É a única trava que não depende de
+  # ninguém lembrar de uma regra.
+  #
+  # ⚠️ Os vigias continuam com a ação obsoleta — o gateway virou k3s em
+  # 14/08/2026 e não há mais Kong em Docker para consertar. Corrigi-los é
+  # trabalho nos repositórios deles; este arquivo só se defende.
+  kong-aposentado:
     image: kong:3.8
     container_name: gateway-kong
     # ⚠️ `no`, e NÃO `unless-stopped`. Ver o bloco acima: a política de reinício
     # é o que fez este contêiner aposentado voltar sozinho e roubar a porta do
     # gateway de produção.
     restart: "no"
-    # `profiles` tira o serviço do `docker compose up` padrão: só sobe com
-    # `--profile aposentado`, que é um ato deliberado e não um descuido.
+    # `profiles` tira o serviço do `docker compose up` padrão. ⚠️ Só que ele NÃO
+    # barra `docker compose up -d <nome-do-servico>` — ver o bloco acima. O que
+    # de fato protege é o nome não ser mais `kong`.
     profiles: ["aposentado"]
     environment:
       KONG_DATABASE: "off"
