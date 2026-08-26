@@ -71,6 +71,15 @@ const MAPA = {
   "http://portal:3301":               "http://central-portal.central-ia.svc.cluster.local:3000",
   "http://sigma-midia:3400":          "http://sigma-midia.sigma-midia.svc.cluster.local:3400",
   "http://sigma-midia-portal:80":     "http://sigma-midia-portal.sigma-midia.svc.cluster.local:80",
+  // ⚠️ `estacao`, e não um namespace do projeto: o 4saas ainda NÃO está no
+  // cluster. Ele roda na estação (8092), e `quatrosaas.estacao` é um Service
+  // sem seletor apontando para o IP de LAN dela.
+  //
+  // Motivo de não estar no cluster: a VM do WSL está com 25 de 31 GB usados, e
+  // subir API + Postgres + Keycloak nesse aperto já derrubou esta distro antes.
+  // Quando houver folga, o destino vira `quatrosaas.quatrosaas.svc...` e só
+  // esta linha muda.
+  "http://quatrosaas:8092":           "http://quatrosaas.estacao.svc.cluster.local:8092",
 };
 
 // Destinos que ainda NÃO têm para onde ir, e por quê. Sem esta lista o script

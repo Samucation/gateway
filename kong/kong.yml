@@ -2506,5 +2506,125 @@ services:
                 config: { status_code_metrics: true, latency_metrics: true }
               }
           ]
+      },
+    {
+        name: quatrosaas-app,
+        url: http://quatrosaas:8092,
+        # `retries: 0` porque por aqui passa CRIAÇÃO DE COBRANÇA. Reenviar um POST
+      # que o servidor já processou é o caminho para dois boletos do mesmo valor
+      # chegando ao mesmo cliente. A idempotência existe do lado do Sigma
+      # (`externalReference`), mas ela protege a cobrança — não protege o resto.
+        retries: 0,
+        connect_timeout: 3000,
+        write_timeout: 30000,
+        read_timeout: 30000,
+        routes:
+          # ── o que fica de FORA, e vem PRIMEIRO ────────────────────────────────
+          # Ordem importa: o Kong casa a rota mais específica, mas declarar o
+          # bloqueio antes deixa a intenção legível para quem for editar depois.
+          [
+            {
+                name: quatrosaas-operacao-fechada,
+                paths: [ "/api/platform" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: ip-restriction,
+                        config:
+                          # Só de dentro de casa. ⚠️ Isto só funciona porque o Kong lê o IP
+                          # real do `CF-Connecting-IP` (ver o compose do gateway) — sem
+                          # aquilo, o cliente seria sempre o túnel, que É uma faixa privada,
+                          # e a lista liberaria a internet inteira.
+                          {
+                            allow: [ "127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" ],
+                            status: 404,
+                            message: "not found"
+                          }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
+            {
+                name: quatrosaas-diagnostico-fechado,
+                paths: [ "/actuator", "/swagger-ui", "/v3/api-docs" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: ip-restriction,
+                        config:
+                          {
+                            allow: [ "127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" ],
+                            status: 404,
+                            message: "not found"
+                          }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
+            # ── o webhook do Sigma ────────────────────────────────────────────────
+          # Vem antes das rotas gerais e com teto próprio: é ele que avisa que o
+          # dinheiro entrou, e ele não pode morrer no rate-limit compartilhado
+          # quando o resto do site estiver sob carga.
+          #
+          # Sem `ip-restriction`: o Sigma chega pela internet. Quem prova que é ele
+          # é a ASSINATURA HMAC, conferida na aplicação — lista de IP aqui só daria
+          # falsa sensação, porque o endereço de origem dele pode mudar.
+            {
+                name: quatrosaas-webhook-sigma,
+                paths: [ "/api/webhooks/sigma" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
+            # ── o checkout público ────────────────────────────────────────────────
+          # Sem login: é por onde o parceiro compra o plano. Teto mais apertado que
+          # o resto porque cada POST aqui abre uma cobrança no Sigma — e cobrança
+          # aberta em excesso é lixo na conciliação, não só carga.
+            {
+                name: quatrosaas-checkout-publico,
+                paths: [ "/api/public/checkout" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 30, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
+            # ── o resto da aplicação ──────────────────────────────────────────────
+            {
+                name: quatrosaas-app-tudo,
+                paths: [ "/" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 300, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              }
+          ]
       }
   ]

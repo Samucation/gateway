@@ -135,6 +135,16 @@ const PROJETOS = [
     // precisa alcançar os dois. Ambos vivem em `sigma-midia_default`.
     redes: ["sigma-midia_default"],
   },
+  {
+    id: "quatrosaas",
+    config: "4saas/deploy/kong/kong.yml",
+    hosts: ["4saas.cursodetecnologia.dev.br"],
+    // ⚠️ Vazio, e isso é deliberado. Os outros declaram a rede do compose deles
+    // porque o Kong precisava alcançar contêineres locais. O 4saas não roda em
+    // Docker: ele está na ESTAÇÃO (8092), e quem o alcança é o Service
+    // `quatrosaas.estacao` do cluster — ver o MAPA em `vm/gerar-kong-vm.mjs`.
+    redes: [],
+  },
 ];
 
 // NÃO existe lista de plugins globais aqui, e é de propósito. `correlation-id`,

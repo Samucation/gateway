@@ -39,7 +39,16 @@ IP=${IP_DA_ESTACAO:-192.168.15.9}
 
 echo "== conferindo que a estacao responde em $IP =="
 vivos=0
-declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 )
+# ⚠️ `quatrosaas` (4saas) entrou aqui em 26/08/2026 e é de natureza DIFERENTE
+# dos outros quatro. Aqueles são motores que sempre viveram na estação (GPU,
+# voz) e não têm por que entrar no cluster. O 4saas é uma aplicação nova que
+# AINDA não foi para o cluster — a VM do WSL está com 25 de 31 GB usados, e
+# subir mais uma pilha (API + Postgres + Keycloak) num aperto desses já derrubou
+# esta distro antes.
+#
+# Ou seja: isto aqui é ponte, não destino. Quando houver folga de memória, o
+# 4saas vira Deployment como os demais e esta linha sai.
+declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 [quatrosaas]=8092 )
 for nome in "${!PORTAS[@]}"; do
   p=${PORTAS[$nome]}
   cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$IP:$p/" 2>/dev/null)
