@@ -2508,24 +2508,28 @@ services:
           ]
       },
     {
-        name: quatrosaas-app,
-        url: http://quatrosaas:8092,
+        name: quatrosaas-api,
+        url: http://quatrosaas-api:8080,
         # `retries: 0` porque por aqui passa CRIAÇÃO DE COBRANÇA. Reenviar um POST
       # que o servidor já processou é o caminho para dois boletos do mesmo valor
-      # chegando ao mesmo cliente. A idempotência existe do lado do Sigma
-      # (`externalReference`), mas ela protege a cobrança — não protege o resto.
+      # chegando ao mesmo cliente. A idempotência do Sigma protege a cobrança —
+      # não protege o resto.
         retries: 0,
         connect_timeout: 3000,
         write_timeout: 30000,
         read_timeout: 30000,
         routes:
-          # ── o que fica de FORA, e vem PRIMEIRO ────────────────────────────────
-          # Ordem importa: o Kong casa a rota mais específica, mas declarar o
-          # bloqueio antes deixa a intenção legível para quem for editar depois.
+          # ── o que NÃO responde pela internet ──────────────────────────────
+          # Declarado ANTES do resto: o Kong casa a rota mais específica, e a ordem
+          # explícita deixa a intenção legível para quem editar depois.
+          #
+          # ⚠️ Isto morre na BORDA, antes de chegar à aplicação. O painel tem o
+          # mesmo corte no nginx da imagem dele; duas trancas independentes, e esta
+          # não depende de uma anotação de autorização estar certa.
           [
             {
                 name: quatrosaas-operacao-fechada,
-                paths: [ "/api/platform" ],
+                paths: [ "/api/platform", "/actuator", "/swagger-ui", "/v3/api-docs" ],
                 strip_path: false,
                 preserve_host: true,
                 plugins:
@@ -2533,10 +2537,9 @@ services:
                     {
                         name: ip-restriction,
                         config:
-                          # Só de dentro de casa. ⚠️ Isto só funciona porque o Kong lê o IP
-                          # real do `CF-Connecting-IP` (ver o compose do gateway) — sem
-                          # aquilo, o cliente seria sempre o túnel, que É uma faixa privada,
-                          # e a lista liberaria a internet inteira.
+                          # ⚠️ Só funciona porque o Kong lê o IP real do `CF-Connecting-IP`
+                          # (ver o compose do gateway). Sem aquilo, o cliente seria sempre o
+                          # túnel — que É faixa privada — e a lista liberaria a internet.
                           {
                             allow: [ "127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" ],
                             status: 404,
@@ -2547,54 +2550,9 @@ services:
                 hosts: [ 4saas.cursodetecnologia.dev.br ]
               },
 
-            {
-                name: quatrosaas-diagnostico-fechado,
-                paths: [ "/actuator", "/swagger-ui", "/v3/api-docs" ],
-                strip_path: false,
-                preserve_host: true,
-                plugins:
-                  [
-                    {
-                        name: ip-restriction,
-                        config:
-                          {
-                            allow: [ "127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" ],
-                            status: 404,
-                            message: "not found"
-                          }
-                      }
-                  ],
-                hosts: [ 4saas.cursodetecnologia.dev.br ]
-              },
-
-            # ── o webhook do Sigma ────────────────────────────────────────────────
-          # Vem antes das rotas gerais e com teto próprio: é ele que avisa que o
-          # dinheiro entrou, e ele não pode morrer no rate-limit compartilhado
-          # quando o resto do site estiver sob carga.
-          #
-          # Sem `ip-restriction`: o Sigma chega pela internet. Quem prova que é ele
-          # é a ASSINATURA HMAC, conferida na aplicação — lista de IP aqui só daria
-          # falsa sensação, porque o endereço de origem dele pode mudar.
-            {
-                name: quatrosaas-webhook-sigma,
-                paths: [ "/api/webhooks/sigma" ],
-                strip_path: false,
-                preserve_host: true,
-                methods: [ POST ],
-                plugins:
-                  [
-                    {
-                        name: rate-limiting,
-                        config: { minute: 600, policy: local, fault_tolerant: true }
-                      }
-                  ],
-                hosts: [ 4saas.cursodetecnologia.dev.br ]
-              },
-
-            # ── o checkout público ────────────────────────────────────────────────
-          # Sem login: é por onde o parceiro compra o plano. Teto mais apertado que
-          # o resto porque cada POST aqui abre uma cobrança no Sigma — e cobrança
-          # aberta em excesso é lixo na conciliação, não só carga.
+            # ── o checkout público ────────────────────────────────────────────
+          # Teto apertado: cada POST aqui abre uma cobrança de verdade no Sigma, e
+          # cobrança aberta em excesso é lixo na conciliação, não só carga.
             {
                 name: quatrosaas-checkout-publico,
                 paths: [ "/api/public/checkout" ],
@@ -2610,9 +2568,61 @@ services:
                 hosts: [ 4saas.cursodetecnologia.dev.br ]
               },
 
-            # ── o resto da aplicação ──────────────────────────────────────────────
+            # ── o aviso de pagamento ──────────────────────────────────────────
+          # Teto próprio e alto: é ele que conta que o dinheiro entrou, e não pode
+          # morrer no limite compartilhado quando o site estiver sob carga.
+          #
+          # Sem `ip-restriction`: o Sigma chega pela internet, e quem prova que é
+          # ele é a ASSINATURA HMAC conferida na aplicação. Lista de IP aqui só
+          # daria falsa sensação — o endereço de origem dele pode mudar.
             {
-                name: quatrosaas-app-tudo,
+                name: quatrosaas-webhook-sigma,
+                paths: [ "/api/public/webhooks/sigma" ],
+                strip_path: false,
+                preserve_host: true,
+                methods: [ POST ],
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 600, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
+            # ── o resto da API pública ────────────────────────────────────────
+            {
+                name: quatrosaas-api-publica,
+                paths: [ "/api/public" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 300, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              }
+          ]
+      },
+
+    # ── O PORTAL (a aplicação Angular) ──────────────────────────────────────
+    {
+        name: quatrosaas-portal,
+        url: http://quatrosaas-portal:80,
+        retries: 1,
+        connect_timeout: 3000,
+        write_timeout: 30000,
+        read_timeout: 30000,
+        routes:
+          # `/` é a rota mais genérica e fica por último de propósito: tudo que não
+          # casou acima é página, e página vem do nginx.
+          [
+            {
+                name: quatrosaas-portal-tudo,
                 paths: [ "/" ],
                 strip_path: false,
                 preserve_host: true,

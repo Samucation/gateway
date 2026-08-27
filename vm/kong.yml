@@ -1698,8 +1698,8 @@ services:
         config:
           status_code_metrics: true
           latency_metrics: true
-  - name: quatrosaas-app
-    url: http://quatrosaas.estacao.svc.cluster.local:8092
+  - name: quatrosaas-api
+    url: http://quatrosaas-api.quatrosaas.svc.cluster.local:8080
     retries: 0
     connect_timeout: 3000
     write_timeout: 30000
@@ -1708,22 +1708,6 @@ services:
       - name: quatrosaas-operacao-fechada
         paths:
           - /api/platform
-        strip_path: false
-        preserve_host: true
-        plugins:
-          - name: ip-restriction
-            config:
-              allow:
-                - 127.0.0.1/32
-                - 10.0.0.0/8
-                - 172.16.0.0/12
-                - 192.168.0.0/16
-              status: 404
-              message: not found
-        hosts:
-          - 4saas.cursodetecnologia.dev.br
-      - name: quatrosaas-diagnostico-fechado
-        paths:
           - /actuator
           - /swagger-ui
           - /v3/api-docs
@@ -1741,21 +1725,6 @@ services:
               message: not found
         hosts:
           - 4saas.cursodetecnologia.dev.br
-      - name: quatrosaas-webhook-sigma
-        paths:
-          - /api/webhooks/sigma
-        strip_path: false
-        preserve_host: true
-        methods:
-          - POST
-        plugins:
-          - name: rate-limiting
-            config:
-              minute: 600
-              policy: local
-              fault_tolerant: true
-        hosts:
-          - 4saas.cursodetecnologia.dev.br
       - name: quatrosaas-checkout-publico
         paths:
           - /api/public/checkout
@@ -1769,7 +1738,42 @@ services:
               fault_tolerant: true
         hosts:
           - 4saas.cursodetecnologia.dev.br
-      - name: quatrosaas-app-tudo
+      - name: quatrosaas-webhook-sigma
+        paths:
+          - /api/public/webhooks/sigma
+        strip_path: false
+        preserve_host: true
+        methods:
+          - POST
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 600
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - 4saas.cursodetecnologia.dev.br
+      - name: quatrosaas-api-publica
+        paths:
+          - /api/public
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - 4saas.cursodetecnologia.dev.br
+  - name: quatrosaas-portal
+    url: http://quatrosaas-portal.quatrosaas.svc.cluster.local:80
+    retries: 1
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: quatrosaas-portal-tudo
         paths:
           - /
         strip_path: false

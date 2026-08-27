@@ -39,16 +39,17 @@ IP=${IP_DA_ESTACAO:-192.168.15.9}
 
 echo "== conferindo que a estacao responde em $IP =="
 vivos=0
-# ⚠️ `quatrosaas` (4saas) entrou aqui em 26/08/2026 e é de natureza DIFERENTE
-# dos outros quatro. Aqueles são motores que sempre viveram na estação (GPU,
-# voz) e não têm por que entrar no cluster. O 4saas é uma aplicação nova que
-# AINDA não foi para o cluster — a VM do WSL está com 25 de 31 GB usados, e
-# subir mais uma pilha (API + Postgres + Keycloak) num aperto desses já derrubou
-# esta distro antes.
+# O `quatrosaas` (4saas) esteve aqui por um dia — 26/08/2026 — enquanto não
+# cabia no cluster. Em 27/08 o teto de memória do WSL subiu de 32 para 40 GB,
+# ele virou Deployment no namespace `quatrosaas`, e a ponte saiu.
 #
-# Ou seja: isto aqui é ponte, não destino. Quando houver folga de memória, o
-# 4saas vira Deployment como os demais e esta linha sai.
-declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 [quatrosaas]=8092 )
+# Fica o registro porque a promessa foi cumprida: "isto é ponte, não destino".
+# Ponte que ninguém remove vira caminho oficial, e no dia da mudança de IP da
+# estação alguém descobre que metade do tráfego passava por aqui.
+#
+# Os quatro que sobraram são de outra natureza: motores que SEMPRE viveram na
+# estação (GPU, voz) e não têm por que entrar no cluster.
+declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 )
 for nome in "${!PORTAS[@]}"; do
   p=${PORTAS[$nome]}
   cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$IP:$p/" 2>/dev/null)

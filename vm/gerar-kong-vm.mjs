@@ -71,15 +71,20 @@ const MAPA = {
   "http://portal:3301":               "http://central-portal.central-ia.svc.cluster.local:3000",
   "http://sigma-midia:3400":          "http://sigma-midia.sigma-midia.svc.cluster.local:3400",
   "http://sigma-midia-portal:80":     "http://sigma-midia-portal.sigma-midia.svc.cluster.local:80",
-  // ⚠️ `estacao`, e não um namespace do projeto: o 4saas ainda NÃO está no
-  // cluster. Ele roda na estação (8092), e `quatrosaas.estacao` é um Service
-  // sem seletor apontando para o IP de LAN dela.
+  // O 4saas entrou no cluster em 27/08/2026, depois de o teto de memória do WSL
+  // subir de 32 para 40 GB. Antes ele apontava para `quatrosaas.estacao` (a
+  // ponte para a estação), e a mudança foi exatamente esta linha — que era o
+  // que aquele comentário prometia.
   //
-  // Motivo de não estar no cluster: a VM do WSL está com 25 de 31 GB usados, e
-  // subir API + Postgres + Keycloak nesse aperto já derrubou esta distro antes.
-  // Quando houver folga, o destino vira `quatrosaas.quatrosaas.svc...` e só
-  // esta linha muda.
-  "http://quatrosaas:8092":           "http://quatrosaas.estacao.svc.cluster.local:8092",
+  // ⚠️ O destino é o PORTAL (nginx), e não a API: é o nginx da imagem que nega
+  // `/api/` por padrão e mantém a lista do que atravessa. Apontar para a API
+  // aqui pularia essa lista inteira.
+  "http://quatrosaas-portal:80":      "http://quatrosaas-portal.quatrosaas.svc.cluster.local:80",
+  // ⚠️ DOIS destinos para o mesmo host, e não é redundância: a aplicação
+  // Angular vem do nginx e a API vem da API. Mandar `/api/public` para o portal
+  // devolve `000` — o `nginx.conf` copiado traz `resolver 127.0.0.11`, que é o
+  // DNS do DOCKER e não responde no Kubernetes.
+  "http://quatrosaas-api:8080":       "http://quatrosaas-api.quatrosaas.svc.cluster.local:8080",
 };
 
 // Destinos que ainda NÃO têm para onde ir, e por quê. Sem esta lista o script
