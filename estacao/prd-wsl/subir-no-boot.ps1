@@ -55,8 +55,15 @@ param(
     # DOIS ARQUIVOS.
     #
     # 80 = Traefik. 8050 = Kong (a entrada da produção). 32000 = registro.
-    # 8080 = Jenkins.
-    [int[]]$Portas = @(80, 8050, 32000, 8080)
+    #
+    # 8081 = a BARREIRA DE SENHA do Jenkins, e não o Jenkins.
+    #
+    # ⚠️ Era 8080 até 28/08/2026, quando o Jenkins passou a escutar só em
+    # `127.0.0.1` (drop-in `10-so-local.conf`). Mapear a 8080 hoje entrega no
+    # vazio; e se um dia o bind for reaberto, mapeá-la publicaria o CI **sem** a
+    # senha — que é o motivo de a barreira existir. Ver
+    # `prd-wsl/nginx-jenkins.conf`.
+    [int[]]$Portas = @(80, 8050, 32000, 8081)
 )
 
 $ErrorActionPreference = 'Stop'

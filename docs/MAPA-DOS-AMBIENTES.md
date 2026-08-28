@@ -24,8 +24,9 @@
 | Túnel | serviço `NerdQuizTunnel` (Windows) | serviço `Cloudflared` | — |
 | Registro de imagens | `localhost:32000`, **dentro do k3s** | **próprio**, Docker :32001 (dados em `G:`) | — |
 | Construtor | `nerdctl` + buildkit (**sem Docker**) | Docker | Docker |
-| Jenkins | serviço do systemd na distro, 1 executor | — | — |
+| Jenkins | serviço do systemd na distro, 1 executor, **preso em `127.0.0.1:8080`**; quem vem de fora passa pelo nginx `:8081`, que pede SENHA | — | — |
 | SonarQube | Pod no cluster, em `sonar.hmg` | — | — |
+| Rancher | — | Pod em `cattle-system`, em `rancher.hmg` (8090) | — |
 
 ⚠️ **O Docker é ambiente de trabalho, não de produção.** Fechá-lo derruba
 homologação e desenvolvimento — e a produção continua de pé. Era esse o
@@ -44,6 +45,25 @@ outro nome:
 47 Pods, os 9 projetos, cada um com o **seu** banco. A entrada é o Traefik do
 k3d, publicado pelo Docker na `8090` da máquina — e é por lá que a esteira
 verifica, com o cabeçalho `Host` de cada domínio `*.hmg`.
+
+> ⚠️ **REMONTADO EM 28/08/2026, e portanto VAZIO.** O contêiner
+> `k3d-hmg-server-0` tinha sido apagado — sobrara só o `serverlb`, em laço de
+> reinício, com `host not found in upstream "k3d-hmg-server-0:6443"`. Volume e
+> rede também já não existiam: o cluster foi recriado do zero por
+> `estacao/montar-hmg.ps1`.
+>
+> Ele tem hoje os **9 namespaces, o RBAC, os segredos, a classe de disco e o
+> Traefik** — mas **nenhuma aplicação**. Os 47 Pods voltam conforme cada
+> esteira rodar; quem implanta é a esteira, nunca `kubectl apply -k` à mão (ver
+> o item 2 deste documento).
+>
+> 🐞 E a remontagem **falhava no último passo** até este dia: o
+> `montar-hmg.ps1` criava **oito** namespaces, enquanto o
+> `jenkins-rbac-hmg.yaml` e o `segredos-hmg.ps1` já assumiam **nove**. O nono
+> (`sigma-payments`) morria em `falhou ao aplicar sigma-payments-secrets`,
+> depois de 95% do cluster montado — e a mensagem mandava procurar no SEGREDO,
+> quando a causa era o namespace que nunca foi criado, dois passos antes.
+> As três listas agora concordam; mudou uma, confira as outras duas.
 
 **Fechar o Docker derruba a homologação inteira, e a produção não sente.** Era
 esse o objetivo do arranjo.
@@ -279,6 +299,45 @@ Quase nunca é a imagem. Nesta ordem:
 A probe está recusando. Chame-a **de dentro do Pod** — 401 costuma significar
 rota fora da lista de liberadas, não serviço quebrado.
 
+### “Não consigo mais acessar o Jenkins”
+
+⚠️ **Confira o serviço e a ROTA separados.** Em 28/08/2026 o Jenkins passou
+quatro dias inalcançável estando **perfeitamente de pé** — respondendo `200` em
+`http://127.0.0.1:8080/login` o tempo todo. Serviço de pé não é evidência de
+serviço alcançável, e confundir os dois foi o que custou o tempo.
+
+```bash
+wsl -d prd -u root -- bash -c "tr -d '\r' < /mnt/e/.../prd-wsl/estado-do-jenkins.sh > /tmp/e.sh; bash /tmp/e.sh"
+```
+
+As duas causas encontradas, independentes uma da outra:
+
+1. **O acesso público nunca veio pelo túnel `nerdquiz`.** Vinha de um túnel
+   PRÓPRIO, o `serverhomol`, que rodava **na VM**. A VM foi desligada em 24/08,
+   o Jenkins foi reinstalado aqui, e a rota não. O pedido passou a chegar no
+   `nerdquiz`, não casou com regra nenhuma e morreu no `http_status:404`.
+
+   ⚠️ O sintoma é **404 limpo**, e não 502 nem 1033 — o que faz parecer
+   "endereço errado" em vez de "rota faltando". `cloudflared tunnel list`
+   mostrando **0 conexões** num túnel é o sinal de que ele morreu com a máquina
+   dele.
+
+2. **O acesso local dependia de um `portproxy` que ninguém refazia.** Ver a
+   dívida logo abaixo — é a mais grave das duas, e não é sobre o Jenkins.
+
+Hoje o caminho é:
+
+```
+internet → Cloudflare → túnel nerdquiz → 127.0.0.1:8081 (portproxy)
+                                          → nginx na distro (SENHA)
+                                             → Jenkins 127.0.0.1:8080
+```
+
+⚠️ **São duas senhas, de camadas diferentes.** A 1ª é a do nginx (caixa do
+navegador, usuário `samuel`); a 2ª é a conta do Jenkins (`samuca`). Digitar a
+segunda na primeira caixa não funciona: o navegador só repergunta, parecendo
+login recusado.
+
 ### “A esteira está verde mas nada mudou”
 
 As quatro causas já vistas, todas silenciosas:
@@ -398,12 +457,37 @@ Nenhuma delas é opcional; todas nasceram de um estrago real.
 
 | o quê | onde está escrito |
 |---|---|
+| 🔴 **A produção não sobe sozinha no boot** | este documento, logo abaixo |
+| ⚠️ O túnel de produção está **sem vigia** | `NerdQuizTunnelWatchdog` está `Disabled` |
 | VM em DHCP, muda de IP sozinha | `vm/IP-OSCILANDO.md`, `vm/IP-FIXO-NAO-FUNCIONA.md` |
 | Homologação **sem gateway** | este documento, item 2 |
 | Produção e CI no mesmo ferro | `vm/MUDAR-PARA-LINUX-NATIVO.md` |
 | Chave SSH pessoal no Jenkins | `vm/DIVIDA-SEGURANCA.md` |
 | Registros de DNS mortos | `vm/DNS-A-APAGAR.md` |
 | `sempre-mais-barato` sem nenhum commit | — |
+
+### 🔴 A tarefa `ProducaoWSL` não existe nesta máquina
+
+Medido em **28/08/2026**: `Get-ScheduledTask -TaskName ProducaoWSL` não devolve
+nada, e a tabela de `portproxy` tinha só `80` e `8050` — faltavam a `8081`
+(Jenkins) e a `32000` (registro).
+
+O `estacao/prd-wsl/subir-no-boot.ps1` existe, está correto, e **nunca foi
+instalado** (ou foi removido). O cabeçalho dele já avisa o que isso significa:
+
+> Sem esta tarefa, um reinício deixa a produção no chão **em silêncio**: os
+> domínios respondem 530, o Windows está normal, e nada no Visualizador de
+> Eventos aponta para a causa.
+
+⚠️ A distro está de pé hoje porque alguém a subiu à mão. **Não sobrevive ao
+próximo reinício.** Conserto (PowerShell **como Administrador**):
+
+```powershell
+.\estacao\prd-wsl\religar-acesso-jenkins.ps1
+```
+
+Ele instala a tarefa, aplica o encaminhamento de portas agora, valida e
+reinicia o túnel, e **prova pela internet** que o Jenkins voltou atrás da senha.
 
 ---
 

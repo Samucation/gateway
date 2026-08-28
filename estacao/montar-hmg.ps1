@@ -31,7 +31,25 @@ $ErrorActionPreference = 'Continue'
 
 $raiz = Split-Path -Parent $MyInvocation.MyCommand.Path
 $k3d  = "$env:USERPROFILE\bin\k3d.exe"
-$NS   = @('urupix','sprinklegames','opuschat','plataforma','central-ia','veltrixa','sigma-financeiro','sigma-midia')
+# ⚠️ NOVE, e não oito. Esta lista tem de casar com as OUTRAS DUAS que já
+# assumem nove: o `resourceNames` de `jenkins-rbac-hmg.yaml` e os `Aplicar` de
+# `segredos-hmg.ps1`.
+#
+# 🐞 Ficou com oito até 28/08/2026, sem `sigma-payments`. O efeito só aparecia
+# no ÚLTIMO passo de uma remontagem completa: os oito primeiros segredos eram
+# aplicados, o nono morria em
+#
+#     falhou ao aplicar sigma-payments-secrets em sigma-payments
+#
+# e o script saía com 1 — depois de já ter montado 95% do cluster. Quem lesse a
+# mensagem procuraria defeito no SEGREDO; a causa era o namespace que nunca foi
+# criado, dois passos antes.
+#
+# ⚠️ O `jenkins-rbac-hmg.yaml` já traz o comentário de que este projeto foi "o
+# nono, esquecido" numa lista anterior. É a MESMA omissão, repetida noutro
+# arquivo — sinal de que a lista precisa de um dono só. Enquanto não tiver,
+# mudou aqui, confira os outros dois.
+$NS   = @('urupix','sprinklegames','opuschat','plataforma','central-ia','veltrixa','sigma-financeiro','sigma-midia','sigma-payments')
 
 function Passo($t) { Write-Host "==> $t" -ForegroundColor Cyan }
 

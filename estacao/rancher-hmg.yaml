@@ -1,0 +1,142 @@
+# O Rancher — painel de administração dos clusters Kubernetes desta casa.
+#
+# ===========================================================================
+# POR QUE ELE EXISTE, E POR QUE COMEÇA PELA HOMOLOGAÇÃO
+# ===========================================================================
+# Até 28/08/2026 não havia painel nenhum: todo diagnóstico de cluster era
+# `kubectl` na mão, e coisas como "qual Pod está reiniciando", "qual PVC ficou
+# Pending" e "o que esse container falou antes de morrer" custavam três comandos
+# cada. O custo não é o comando — é ninguém olhar por causa dele.
+#
+# ⚠️ Ele entra pela HOMOLOGAÇÃO de propósito. O Rancher pede um ServiceAccount
+# com poder de cluster inteiro; ensaiar isso primeiro num cluster descartável é
+# a diferença entre "deu errado, recria" e "deu errado no que move dinheiro".
+#
+# ===========================================================================
+# ⚠️ O CUSTO, MEDIDO E NÃO ESTIMADO
+# ===========================================================================
+# As distros do WSL2 dividem UMA máquina virtual e UM teto (`memory=40GB` no
+# `.wslconfig`). A produção mora na distro `prd` e o k3d de homologação mora no
+# Docker Desktop — mas os dois saem do MESMO bolo.
+#
+# Então o Rancher aqui não é "de graça porque é homologação": ele tira memória
+# de um limite que a produção compartilha. Reserva pedida abaixo: 1 GB, teto
+# 2 GB. Se um dia faltar, o caminho é o que o `.wslconfig` já manda — ENXUGAR
+# contêiner, e não subir o teto até encostar no físico.
+#
+# ===========================================================================
+# ⚠️ `tls: external` — a escolha de TLS, e quando ela NÃO serve
+# ===========================================================================
+# Aqui o Rancher serve HTTP puro, e quem termina TLS seria a camada da frente.
+# Neste ambiente não há camada nenhuma: o acesso é
+# `http://127.0.0.1:8090` com `Host: rancher.hmg`, ou seja, navegador → Docker →
+# contêiner do nó, tudo dentro desta máquina. Nenhum salto de rede.
+#
+# 🔴 EM QUALQUER OUTRO AMBIENTE ISSO É INACEITÁVEL. A senha do painel que
+# administra o cluster atravessaria o fio em claro. Para montar isto num
+# ambiente de verdade, ver a seção "Rancher em ambiente novo" do runbook em
+# `docs/RANCHER.md` — lá está o caminho com cert-manager e certificado real.
+#
+# A alternativa (`ingress.tls.source: rancher`) traria o cert-manager junto:
+# mais ~300 MB e três CRDs, para emitir um certificado autoassinado que o
+# navegador recusa de qualquer jeito. Num painel que só se alcança pelo
+# loopback, isso é custo sem proteção.
+#
+# ===========================================================================
+# POR QUE `HelmChart`, E NÃO `helm install`
+# ===========================================================================
+# O k3s (e portanto o k3d) traz o controlador `helm.cattle.io`: o próprio
+# cluster instala o gráfico a partir deste objeto.
+#
+# • não exige `helm` na estação — e não exigia mesmo: ele NÃO está instalado;
+# • o que está no ar é o que está no arquivo, versionado no Git. Um
+#   `helm install` digitado no terminal vira conhecimento que mora na cabeça de
+#   quem digitou;
+# • montar em ambiente novo é `kubectl apply -f` deste arquivo. Que é
+#   exatamente o pedido que originou isto.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cattle-system
+---
+# ===========================================================================
+# 🐞 SEM ISTO O PAINEL NÃO ABRE — e o sintoma manda procurar no lugar errado.
+# ===========================================================================
+# Com `tls: external` o Rancher NÃO passa a falar HTTP e pronto: ele continua
+# exigindo HTTPS, e delega a prova disso à camada da frente. Concretamente, ele
+# olha o cabeçalho `X-Forwarded-Proto`. Não vendo `https`, devolve
+#
+#     302  ->  https://rancher.hmg/
+#
+# que é um endereço sem porta e sem TLS: o navegador segue o desvio e morre em
+# "não foi possível conectar".
+#
+# ⚠️ O Ingress está CERTO nesse momento — sem anotação de redirecionamento,
+# `ssl-redirect: "false"`, backend na porta 80. Quem redireciona é a aplicação,
+# não a entrada. Passei por aqui olhando anotação de Ingress primeiro; o
+# `kubectl get ingress -o yaml` vem limpo e não aponta para nada.
+#
+# Este Middleware é o que faz o Traefik cumprir o contrato que `tls: external`
+# pressupõe do balanceador da frente.
+#
+# 🔴 E é também o que torna esta montagem SÓ ACEITÁVEL EM LOOPBACK: estamos
+# afirmando "veio por https" numa requisição que veio por http. Num ambiente de
+# verdade a afirmação tem de ser VERDADE — TLS real terminando no Traefik. Ver
+# `docs/RANCHER.md`, seção "Rancher em ambiente novo".
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: proto-https
+  namespace: cattle-system
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: https
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: rancher
+  # ⚠️ `kube-system`, e não `cattle-system`. O controlador de HelmChart do k3s
+  # só observa objetos no namespace dele; declarado noutro lugar, este objeto
+  # seria aceito pela API e NUNCA processado — e o sintoma é o pior tipo:
+  # `kubectl get helmchart` mostra o objeto lá, e nada acontece.
+  namespace: kube-system
+spec:
+  repo: https://releases.rancher.com/server-charts/latest
+  chart: rancher
+  targetNamespace: cattle-system
+  createNamespace: true
+  valuesContent: |-
+    # O nome interno, no mesmo padrão de `sonar.hmg`: a esteira e o operador
+    # falam com ele sem depender do túnel. Ver docs/MAPA-DOS-AMBIENTES.md.
+    hostname: rancher.hmg
+
+    # ⚠️ 1, e não 3. O gráfico pede três réplicas por padrão, para alta
+    # disponibilidade. Este cluster tem UM nó: as outras duas ficariam em
+    # `Pending` para sempre por antiafinidade, e o painel apareceria como
+    # "instalação incompleta" sem nada de errado.
+    replicas: 1
+
+    # Ver o bloco de TLS no cabeçalho antes de mexer nesta linha.
+    tls: external
+
+    ingress:
+      ingressClassName: traefik
+      # ⚠️ O nome do Middleware para o Traefik é `<namespace>-<nome>@kubernetescrd`,
+      # e não `<nome>`. Escrito curto, o Traefik não encontra a referência e
+      # devolve 500 na rota — o que parece o Rancher fora do ar.
+      extraAnnotations:
+        traefik.ingress.kubernetes.io/router.middlewares: cattle-system-proto-https@kubernetescrd
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        # ⚠️ Teto explícito, e não "sem limite". O `.wslconfig` documenta que o
+        # que já derrubou esta máquina foi contêiner sem teto: o Redpanda do
+        # Veltrixa sozinho segurava 2,3 GiB. Um painel administrativo não pode
+        # ser o próximo.
+        memory: 2Gi
