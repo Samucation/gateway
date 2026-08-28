@@ -507,21 +507,31 @@ Nenhuma delas é opcional; todas nasceram de um estrago real.
 | Registros de DNS mortos | `vm/DNS-A-APAGAR.md` |
 | `sempre-mais-barato` sem nenhum commit | — |
 
-### 🔴 A tarefa `ProducaoWSL` não existe nesta máquina
+### ✅ RESOLVIDO 28/08/2026 — a produção não subia sozinha no boot
 
-Medido em **28/08/2026**: `Get-ScheduledTask -TaskName ProducaoWSL` não devolve
-nada, e a tabela de `portproxy` tinha só `80` e `8050` — faltavam a `8081`
-(Jenkins) e a `32000` (registro).
+⚠️ **Consultar tarefa agendada SEM elevação dá resposta VAZIA, não erro.**
 
-O `estacao/prd-wsl/subir-no-boot.ps1` existe, está correto, e **nunca foi
-instalado** (ou foi removido). O cabeçalho dele já avisa o que isso significa:
+`Get-ScheduledTask -TaskName ProducaoWSL` devolvia nada, e eu li isso como "a
+tarefa não existe". Está errado: a tarefa roda como **SYSTEM**, e um usuário
+comum não a enxerga. Com elevação, o mesmo `schtasks` diz `ERROR: Access is
+denied` — que é a resposta honesta. O `Get-ScheduledTask` engole isso e devolve
+vazio, que é indistinguível de "não existe".
+
+**A evidência que valia era outra, e essa era sólida:** a tabela de `portproxy`
+tinha só `80` e `8050 → 80`. Faltavam a `8081` (a barreira do Jenkins) e a
+`32000` (o registro), e o `8050` apontava para a porta errada — ou seja, aquela
+tabela **não foi escrita por este script**, e sim pelo mapeamento do corte para
+k3s. Qualquer que fosse o estado da tarefa, o caminho de boot não estava
+produzindo o mapeamento certo. Foi por isso que `http://localhost:8080` morreu.
+
+Hoje a tarefa está `Enabled`, `SYSTEM`, `At system start up`, e as quatro portas
+estão na tabela. O cabeçalho do `subir-no-boot.ps1` explica o que estava em jogo:
 
 > Sem esta tarefa, um reinício deixa a produção no chão **em silêncio**: os
 > domínios respondem 530, o Windows está normal, e nada no Visualizador de
 > Eventos aponta para a causa.
 
-⚠️ A distro está de pé hoje porque alguém a subiu à mão. **Não sobrevive ao
-próximo reinício.** Conserto (PowerShell **como Administrador**):
+Conserto executado em 28/08/2026 (PowerShell **como Administrador**):
 
 ```powershell
 .\estacao\prd-wsl\religar-acesso-jenkins.ps1
@@ -529,6 +539,14 @@ próximo reinício.** Conserto (PowerShell **como Administrador**):
 
 Ele instala a tarefa, aplica o encaminhamento de portas agora, valida e
 reinicia o túnel, e **prova pela internet** que o Jenkins voltou atrás da senha.
+
+Resultado medido: as 4 portas na tabela, Kong `200` pela porta do Windows, e
+`https://jenkins.cursodetecnologia.dev.br/login` devolvendo **`401` sem senha**
+e **`200` com** — que é exatamente o que se queria.
+
+⚠️ **Ainda pendente: o `NerdQuizTunnelWatchdog` está `Disabled`.** O túnel de
+produção está sem vigia, e túnel vivo mas sem rotear devolve 530 com o serviço
+aparecendo `Running`.
 
 ---
 
