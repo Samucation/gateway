@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Monta (ou remonta) o cluster de HOMOLOGAÇÃO desta estação, do zero.
 

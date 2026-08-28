@@ -299,6 +299,47 @@ Quase nunca é a imagem. Nesta ordem:
 A probe está recusando. Chame-a **de dentro do Pod** — 401 costuma significar
 rota fora da lista de liberadas, não serviço quebrado.
 
+### “O `.ps1` não compila, e o erro aponta para uma linha inocente”
+
+    The string is missing the terminator: ".
+    Missing closing '}' in statement block or type definition.
+
+⚠️ **Confira o BOM antes de olhar o código.** O PowerShell 5.1 lê arquivo
+**sem BOM como ANSI (CP1252)**, e aí todo caractere multi-byte é mal decodificado.
+
+```powershell
+$b = [IO.File]::ReadAllBytes('caminho.ps1'); '{0:X2} {1:X2} {2:X2}' -f $b[0],$b[1],$b[2]
+# EF BB BF = tem BOM (certo).  Qualquer outra coisa = vai ser lido como ANSI.
+```
+
+🐞 **O culpado costuma ser um emoji, e só alguns são fatais.** Medido:
+
+    🔴  U+1F534  ->  F0 9F 94 B4
+                            ↑
+                       lido como CP1252, o 0x94 vira ”  (U+201D)
+
+e o PowerShell **aceita aspa curva como delimitador de string**. Um `🔴` dentro
+de uma string com aspas duplas fecha a string ali, e o parser se perde — o erro
+sai dezenas de linhas adiante, numa linha que não tem nada de errado.
+
+⚠️ **Por isso o mesmo emoji em COMENTÁRIO não quebra nada** — e é por isso que
+vários `.ps1` deste repositório vivem sem BOM sem nunca terem dado problema.
+`⚠️` (E2 9A A0) e `🐞` (F0 9F 90 9E) também são inofensivos: nenhum tem `0x93`
+nem `0x94`.
+
+Conserto — **`Set-Content` não serve** (grava ANSI por padrão, é o erro oposto):
+
+```powershell
+$t = [IO.File]::ReadAllText($p, (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText($p, $t, (New-Object Text.UTF8Encoding $true))
+```
+
+E confira sintaxe **sem executar**, que é mais barato que descobrir rodando:
+
+```powershell
+$e = $null; [void][Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$e); $e
+```
+
 ### “Não consigo mais acessar o Jenkins”
 
 ⚠️ **Confira o serviço e a ROTA separados.** Em 28/08/2026 o Jenkins passou

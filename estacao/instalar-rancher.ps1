@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Instala o Rancher — o painel de administração dos clusters — num cluster k3s/k3d.
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Refaz o caminho de fora até o Jenkins e instala a tarefa que sustenta a produção
 no boot. PRECISA DE ADMINISTRADOR.
@@ -74,7 +74,11 @@ if ($semSenha -ne '401') {
 
 # E o Jenkins tem de estar FECHADO: se ele ainda escuta fora do loopback, a
 # barreira pode ser contornada por quem alcancar a distro.
-$bind = (& wsl.exe -d $Distro -u root -- bash -c "ss -ltn | grep ':8080' | awk '{print \$4}' | head -1" 2>$null)
+# 🐞 SEM `awk '{print $4}'`, e o motivo está em `subir-no-boot.ps1`: o `$4` é
+# variável para o PowerShell TAMBÉM. Ele a troca por VAZIO antes de mandar o
+# comando, o awk recebe `{print }` e a conferência conclui o que quiser — com a
+# rede perfeita. `tr`+`cut` fazem o mesmo sem nenhum cifrão.
+$bind = (& wsl.exe -d $Distro -u root -- bash -c "ss -ltn | grep ':8080' | tr -s ' ' | cut -d' ' -f4 | head -1" 2>$null)
 $bind = ("$bind" -replace "`0", '').Trim()
 Diga "bind do Jenkins: $bind"
 if ($bind -notmatch '127\.0\.0\.1') {

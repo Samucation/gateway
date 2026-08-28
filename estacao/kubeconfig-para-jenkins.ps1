@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Gera o kubeconfig do cluster de HOMOLOGAÇÃO e o instala no Jenkins.
 
