@@ -40,16 +40,48 @@ def jenkins = Jenkins.get()
 
 // ---- 1. o destino de homologação é MESMO outro cluster? -------------------
 def kubeconfig = "/var/lib/jenkins/.kube/config-hmg"
-def noHmg = ""
-def noPrd = ""
-try {
-    noHmg = ["kubectl", "--kubeconfig=${kubeconfig}", "get", "nodes",
-             "-o", "jsonpath={.items[0].metadata.name}"].execute().text.trim()
-    noPrd = ["kubectl", "get", "nodes",
-             "-o", "jsonpath={.items[0].metadata.name}"].execute().text.trim()
-} catch (e) {
-    println "hmg-religado: nao consegui consultar os clusters (${e.message})"
+
+// ---------------------------------------------------------------------------
+// ⚠️ COM LIMITE DE TEMPO -- e este script JA TRAVOU A PARTIDA DO JENKINS
+// ---------------------------------------------------------------------------
+// A versao anterior chamava `.execute().text` direto. Esse `.text` BLOQUEIA ate
+// o processo terminar, e `init.groovy.d` roda DENTRO da partida do Jenkins:
+// enquanto o comando nao volta, o Jenkins nao sobe.
+//
+// Em 29/08/2026, com o Docker Desktop desligado (o k3d de homologacao vive
+// nele), o `kubectl` ficou pendurado esperando a rede. Resultado medido:
+//
+//   systemd:  "Job for jenkins.service failed because a timeout was exceeded"
+//   HTTP:     503 por mais de 12 minutos
+//   ps:       um `kubectl` do usuario jenkins parado desde a partida
+//
+// O Jenkins so voltou depois de alguem matar o processo a mao. Ou seja: um
+// cluster de HOMOLOGACAO fora do ar derrubava a ferramenta que constroi
+// PRODUCAO -- e o sintoma ("timeout do systemd") nao aponta para ca em momento
+// nenhum.
+//
+// ⚠️ O `--request-timeout` do proprio kubectl NAO basta: ele limita a chamada
+// HTTP, e nao a resolucao de nome nem o aperto de mao TLS, que e onde este caso
+// travou. Por isso o teto e' externo, com `timeout(1)` do shell, e ainda ha um
+// `waitForOrKill` como segunda rede.
+def perguntaAoCluster = { List<String> cmd ->
+    try {
+        def p = (["timeout", "10"] + cmd).execute()
+        def saida = new StringBuffer()
+        def erro = new StringBuffer()
+        p.consumeProcessOutput(saida, erro)
+        p.waitForOrKill(12000)
+        return saida.toString().trim()
+    } catch (e) {
+        println "hmg-religado: nao consegui consultar o cluster (${e.message})"
+        return ""
+    }
 }
+
+def noHmg = perguntaAoCluster(["kubectl", "--kubeconfig=${kubeconfig}", "get", "nodes",
+                               "-o", "jsonpath={.items[0].metadata.name}"])
+def noPrd = perguntaAoCluster(["kubectl", "get", "nodes",
+                               "-o", "jsonpath={.items[0].metadata.name}"])
 
 if (!noHmg) {
     println "hmg-religado: o cluster de homologacao nao respondeu -- NAO religando."

@@ -116,6 +116,10 @@ REPOS = [
     'system-api', 'sigma-midia', 'central-ia', 'opuschat', 'cafe-mobile-erp',
     'sigma-financeiro', 'live-flow', 'sigma-payments', 'sprinklegames-portal',
     'gateway',
+    // Entrou em 29/08/2026. Era o unico projeto da casa com deploy
+    // inteiramente a mao: os commits "esteira: prd em <sha>" dele eram
+    // gerados pelos scripts locais, e nao por CI.
+    'cartorio-conceicao',
 ]
 
 def jenkins = Jenkins.get()
