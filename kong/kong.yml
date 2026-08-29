@@ -2627,6 +2627,49 @@ services:
                 hosts: [ 4saas.cursodetecnologia.dev.br ]
               },
 
+            # ── as sugestões da apresentação ──────────────────────────────────
+          #
+          # 🐞 O MESMO DEFEITO DA BANCADA, com um sintoma PIOR.
+          #
+          # Publicada em 29/08/2026 sem esta rota, `/api/apresentacao/**` caiu no
+          # `/` — que vai para o PORTAL. O nginx da imagem do portal TEM um
+          # `location /api/apresentacao/` com `proxy_pass`, mas ele usa
+          # `resolver 127.0.0.11`, que é o DNS interno do **Docker**. Dentro do
+          # k3s esse endereço não existe: o nome nunca resolve, e a requisição
+          # fica pendurada até estourar.
+          #
+          # Então aqui o sintoma não foi 404 — foi **504 em exatamente 30,0s**, e
+          # 504 parece aplicação lenta ou banco travado, não rota faltando. Foi
+          # preciso comparar com `/api/public/plans` (200 em 0,13s, que TEM rota
+          # própria no Kong) para separar as duas coisas.
+          #
+          # Sem `ip-restriction`: quem opina na apresentação é convidado do
+          # negócio e entra pela internet. Quem protege é o token, e a aplicação
+          # ainda exige o papel `APRESENTACAO_REVISOR`.
+          #
+          # ⚠️ Só `/api/apresentacao`. A triagem vive em
+          # `/api/platform/apresentacao/**` e continua caindo na
+          # `quatrosaas-operacao-fechada`, que é fechada por IP — aprovar não se
+          # faz pela internet.
+          #
+          # Teto baixo de propósito: o envio é em LOTE, uma requisição por
+          # apresentação inteira. Quem precisar de mais de 60 por minuto não está
+          # anotando sugestão.
+            {
+                name: quatrosaas-apresentacao,
+                paths: [ "/api/apresentacao" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 60, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
             # ── o resto da API pública ────────────────────────────────────────
             {
                 name: quatrosaas-api-publica,

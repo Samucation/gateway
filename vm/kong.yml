@@ -1768,6 +1768,19 @@ services:
               fault_tolerant: true
         hosts:
           - 4saas.cursodetecnologia.dev.br
+      - name: quatrosaas-apresentacao
+        paths:
+          - /api/apresentacao
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - 4saas.cursodetecnologia.dev.br
       - name: quatrosaas-api-publica
         paths:
           - /api/public
