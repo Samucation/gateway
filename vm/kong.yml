@@ -1753,6 +1753,21 @@ services:
               fault_tolerant: true
         hosts:
           - 4saas.cursodetecnologia.dev.br
+      - name: quatrosaas-api-parceiro
+        paths:
+          - /api/bancada
+          - /api/creditos
+          - /api/marketplace
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: true
+        hosts:
+          - 4saas.cursodetecnologia.dev.br
       - name: quatrosaas-api-publica
         paths:
           - /api/public

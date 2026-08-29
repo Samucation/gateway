@@ -2591,6 +2591,42 @@ services:
                 hosts: [ 4saas.cursodetecnologia.dev.br ]
               },
 
+            # ── a API DO PARCEIRO, autenticada ────────────────────────────────
+          #
+          # 🐞 ESTA ROTA FALTAVA, e o sintoma enganava.
+          #
+          # `/api/bancada` e `/api/creditos` não constavam aqui, então o Kong não
+          # tinha rota para eles e caíam no `/` — que vai para o PORTAL (nginx).
+          # O nginx não conhece aqueles caminhos e devolvia **404**.
+          #
+          # ⚠️ O 404 é o que torna isto difícil de achar: ele é idêntico ao de uma
+          # rota que não existe na aplicação. A conferência que separou as duas
+          # coisas foi chamar o Service DIRETO, sem o Kong no caminho — ali as
+          # rotas respondiam **401**, provando que existiam e exigiam token, e que
+          # o problema estava no gateway.
+          #
+          # Sem `ip-restriction`, ao contrário de `/api/platform`: estas rotas são
+          # do PARCEIRO, que acessa pela internet. Quem protege é o token — e a
+          # aplicação exige papel (`COMPANY_ADMIN`, `SELLER`) além dele.
+          #
+          # Teto próprio e maior que o do checkout: montar uma Bancada são muitas
+          # chamadas pequenas em sequência (põe, tira, troca o modo), e o limite do
+          # checkout mataria a navegação normal de quem está escolhendo.
+            {
+                name: quatrosaas-api-parceiro,
+                paths: [ "/api/bancada", "/api/creditos", "/api/marketplace" ],
+                strip_path: false,
+                preserve_host: true,
+                plugins:
+                  [
+                    {
+                        name: rate-limiting,
+                        config: { minute: 300, policy: local, fault_tolerant: true }
+                      }
+                  ],
+                hosts: [ 4saas.cursodetecnologia.dev.br ]
+              },
+
             # ── o resto da API pública ────────────────────────────────────────
             {
                 name: quatrosaas-api-publica,
