@@ -88,19 +88,25 @@ $RECIPIENTE = 'age122t884r4lq8jpexlkqxeumz52dny6rs0upxz22kqfxc0qh7qyvuqy2a5yk'
 # exemplo, guarda credencial de sandbox configurada à mão. Regra simples: leva
 # tudo, não esquece nada.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ⚠️ 29/08/2026 — NOVE ENTRADAS SAÍRAM DAQUI, e não por limpeza de estilo.
+#
+# Elas apontavam para contêineres que não existem mais: aqueles projetos
+# migraram para o k3s da distro `prd`. O script reclamava dos nove todas as
+# noites, e a reclamação tinha um efeito colateral que ninguém ligou à causa —
+# falha PULA A ROTAÇÃO, então as cargas antigas nunca saíam e o G: chegou a 94%.
+#
+# Quem cuida deles agora é a seção `1b`, que DESCOBRE os bancos perguntando ao
+# cluster. Se algum voltar a subir no Docker, esta tabela não vai vê-lo; o
+# lugar certo de mexer, nesse dia, é aqui.
+#
+# Ficaram os quatro que ainda rodam em Docker de verdade — conferido com
+# `docker ps` no dia, e não de cabeça.
+# ---------------------------------------------------------------------------
 $BANCOS = @(
     @{ Cont='liveflow-db';               User='liveflow';   Bases=@('liveflow','liveflow_e2e') }
     @{ Cont='sigma-db';                  User='sigma';      Bases=@('sigma_financeiro','sigma_financeiro_e2e') }
     @{ Cont='sigma-db-sandbox';          User='sigma';      Bases=@('sigma_financeiro_sandbox') }
-    @{ Cont='sigma-payments-postgres-1'; User='sigma';      Bases=@('sigma_payments','sigma_ops') }
-    @{ Cont='veltrixa-postgres';         User='veltrixa';   Bases=@('veltrixa_db') }
-    @{ Cont='veltrixa-nfe-postgres';     User='nfe';        Bases=@('nfe_db') }
-    @{ Cont='veltrixa-keycloak-postgres';User='keycloak';   Bases=@('keycloak_db') }
-    @{ Cont='sigma-midia-postgres';      User='midia';      Bases=@('sigma_midia') }
-    @{ Cont='plataforma-db';             User='plataforma'; Bases=@('plataforma') }
-    @{ Cont='opuschat-db';               User='plataforma'; Bases=@('plataforma') }
-    @{ Cont='central-db-motor';          User='central';    Bases=@('central') }
-    @{ Cont='central-db-portal';         User='central';    Bases=@('central_portal') }
     @{ Cont='sprinklegames-postgres';    User='sprinkle';   Bases=@('sprinklegames','sprinklegames_teste') }
 )
 
@@ -228,50 +234,109 @@ foreach ($b in $BANCOS) {
 }
 
 # ---------------------------------------------------------------------------
-# 2. A MÍDIA (MinIO) — os arquivos que o sigma_midia só INDEXA.
+# 1b. OS BANCOS E ARQUIVOS DO K3S — a produção de verdade.
 #
-# ⚠️ Sem isto o backup do banco seria uma mentira útil: as linhas voltariam
-# apontando para objetos que não existem mais, e cada imagem do catálogo viraria
-# um 404. O banco sabe o NOME do arquivo; quem tem o arquivo é o MinIO.
 # ---------------------------------------------------------------------------
-if (-not $SemMidia -and -not $Apenas) {
-    Passo "Mídia (MinIO)"
-    $vivo = (& docker ps --filter ('name=^/sigma-midia-minio' + '$') --format '{{.Names}}' 2>$null)
-    if (-not $vivo) {
-        Falha "sigma-midia-minio não está em pé — a mídia NÃO foi salva"
-        $erros.Add("minio: contêiner fora do ar")
-    } else {
-        # 🐞 `docker cp`, e NÃO `docker exec ... tar`.
-        #
-        # A imagem do MinIO é mínima: não tem `tar` nem `find`. O primeiro
-        # `docker exec tar -czf -` produziu arquivo vazio, e isso só apareceu
-        # porque a guarda de tamanho o pegou — sozinho, teria deixado um
-        # `midia.tgz` de 0 byte com toda a cara de backup.
-        #
-        # `docker cp` é executado pelo DAEMON, que lê o sistema de arquivos do
-        # contêiner por fora. É exatamente onde ele difere do `kubectl cp`, que
-        # roda `tar` DENTRO do destino e falha calado nesta mesma imagem.
-        $tmpM = Join-Path $env:TEMP "midia-$carimbo"
-        Remove-Item $tmpM -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $tmpM -Force | Out-Null
+# ⚠️ ISTO FALTAVA, E O BURACO DUROU MESES
+# ---------------------------------------------------------------------------
+# A tabela `$BANCOS` acima é escrita à mão. Em 29/08/2026, 9 dos 13 contêineres
+# dela já não existiam: a produção tinha migrado para o k3s da distro WSL2
+# `prd`, e a tabela ficou apontando para fantasmas.
+#
+# O script era honesto — reclamava de cada ausente. Só que ninguém lê o log de
+# uma tarefa das 02:30, e havia um efeito colateral que ninguém ligou à causa:
+# como falha PULA A ROTAÇÃO (e isso é proposital, ver o fim do arquivo), as
+# cargas antigas nunca eram removidas e o G: chegou a 94%.
+#
+# O que ninguém via era pior. Os 19 bancos que passaram a existir no k3s não
+# estavam na tabela, então não geravam erro nenhum: sem dump, sem falha, sem
+# pista. Entre eles o do CARTÓRIO — que guarda pedido de cidadão, candidatura,
+# e (com a V27) documento pessoal anexado a solicitação.
+#
+# ⚠️ Por isso a parte nova NÃO TEM LISTA. Ela pergunta ao cluster quem responde
+# como Postgres e faz backup de quem responder. Uma segunda lista à mão
+# apodreceria exatamente como a primeira — e a primeira levou meses para ser
+# notada.
+#
+# ⚠️ CUSTO: são ~19 bancos e os volumes de arquivo, todos às 02:30. É leitura,
+# mas é leitura em cima da produção. Se um dia pesar, o caminho é escalonar por
+# namespace (os dois scripts aceitam o namespace como segundo argumento), e não
+# reduzir o que se copia.
+# ---------------------------------------------------------------------------
+function Invocar-NaDistro($caminhoDoScript, $argumentos) {
+    # ⚠️ O script vai por base64, e não pelo caminho `/mnt/e/...`.
+    #
+    # 🐞 Dois motivos, os dois já custaram tempo nesta casa: o arquivo está num
+    # repositório com final de linha CRLF, e `bash` engasga com o `\r` de um
+    # jeito que o erro não menciona; e a passagem de argumentos por
+    # `wsl -- prog args` é reinterpretada pelo shell da distro antes de chegar
+    # ao programa.
+    $texto = (Get-Content $caminhoDoScript -Raw -Encoding UTF8) -replace "`r", ""
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($texto))
+    $comando = "echo $b64 | base64 -d > /tmp/_bkp.sh; bash /tmp/_bkp.sh $argumentos; rc=`$?; rm -f /tmp/_bkp.sh; exit `$rc"
+    return (& wsl -d prd -u root -- bash -lc $comando 2>&1)
+}
 
-        & cmd.exe /c "docker cp sigma-midia-minio:/data `"$tmpM`" >nul 2>&1"
-        $copiados = @(Get-ChildItem $tmpM -Recurse -File -ErrorAction SilentlyContinue).Count
+if (-not $Apenas) {
+    Passo "k3s de produção (bancos e arquivos)"
 
-        if ($copiados -eq 0) {
-            Falha "o docker cp da mídia não trouxe arquivo nenhum"
-            $erros.Add("minio: docker cp vazio")
-        } else {
-            $zip = Join-Path $pasta 'midia.zip'
-            Compress-Archive -Path "$tmpM\*" -DestinationPath $zip -Force
-            $mb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
-            Cifrar $zip "$zip.age"
-            Ok "mídia — $copiados arquivo(s), $mb MB, cifrada"
-            $feitos++
+    $destinoWsl = "/mnt/g/Backups/estacao/$carimbo"
+
+    foreach ($etapa in @(
+        @{ Nome = 'bancos';   Script = 'exportar-bancos-do-k3s.sh' },
+        @{ Nome = 'arquivos'; Script = 'exportar-arquivos-do-k3s.sh' }
+    )) {
+        $script = Join-Path $PSScriptRoot $etapa.Script
+        if (-not (Test-Path $script)) {
+            Falha "$($etapa.Script) não encontrado — o k3s NÃO foi salvo"
+            $erros.Add("k3s/$($etapa.Nome): script ausente")
+            continue
         }
-        Remove-Item $tmpM -Recurse -Force -ErrorAction SilentlyContinue
+
+        $saida = Invocar-NaDistro $script $destinoWsl
+
+        foreach ($linha in $saida) {
+            $campos = "$linha".Split('|')
+            switch ($campos[0]) {
+                'OK'     { Ok ("k3s " + $campos[1] + $(if ($campos.Count -gt 3) { " — " + $campos[3] } else { "" })); $feitos++ }
+                'FALHA'  { Falha ("k3s " + $campos[1]); $erros.Add("k3s: $($campos[1])") }
+                'PULADO' { Diga ("pulado: " + $campos[1]) }
+                'RESUMO' { Diga ("$($etapa.Nome): $($campos[1]) copiado(s), $($campos[2]) falha(s), $($campos[3]) pulado(s)") }
+            }
+        }
+    }
+
+    # ⚠️ Cifra o que veio do k3s. Sem isto os dumps de produção ficariam em CLARO
+    # no disco externo, ao lado dos que são cifrados — e a diferença não estaria
+    # em lugar nenhum além deste comentário.
+    foreach ($cru in (Get-ChildItem $pasta -File | Where-Object {
+                          $_.Name -like '*.dump' -or $_.Name -like '*.tar.gz' })) {
+        Cifrar $cru.FullName "$($cru.FullName).age"
     }
 }
+
+# ---------------------------------------------------------------------------
+# 2. A MÍDIA (MinIO) — APOSENTADA EM 29/08/2026, e não removida por limpeza.
+#
+# Esta seção procurava o contêiner `sigma-midia-minio` no DOCKER. Ele não
+# existe mais lá: o MinIO foi para o k3s junto com o resto da produção, e a
+# seção passou a falhar todas as noites — sendo, sozinha, a razão de o backup
+# sair com código 1 e a rotação nunca rodar.
+#
+# ⚠️ O acervo NÃO ficou descoberto: quem o copia agora é a seção `1b`, que
+# empacota o volume `sigma-midia/objetos-sigma-midia-minio-0` direto do
+# cluster (medido: 928 arquivos, 53,6 MB).
+#
+# ⚠️ E o problema que o comentário antigo registrava continua verdadeiro e
+# continua tratado: a imagem do MinIO não tem `tar`, então `kubectl cp` falha
+# calado nela. A solução de lá era `docker cp`, que o daemon executa por fora;
+# a de agora é subir um Pod auxiliar que monta o MESMO volume em modo somente
+# leitura e traz as ferramentas. Vale para o MinIO e para qualquer imagem
+# mínima que apareça depois — ver `exportar-arquivos-do-k3s.sh`.
+#
+# O parâmetro `-SemMidia` continua aceito para não quebrar quem o usa em
+# script, e hoje não faz nada.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # 3. OS SEGREDOS (.env)
