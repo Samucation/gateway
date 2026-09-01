@@ -173,23 +173,60 @@ spec:
           # banco + índice do Elasticsearch). `failureThreshold` alto no startup
           # e liveness só depois — senão o Kubernetes o mata no meio da
           # migração, e a próxima tentativa encontra o banco pela metade.
+          #
+          # -------------------------------------------------------------------
+          # 🐞 01/09/2026 — E FALTAVA O `timeoutSeconds`
+          # -------------------------------------------------------------------
+          # As três sondas abaixo não o declaravam, e o padrão do Kubernetes é
+          # **1 segundo**. Ou seja: a sonda não perguntava "você está vivo?",
+          # perguntava "você responde em menos de um segundo?".
+          #
+          # Enquanto a esteira do cartório rodava NESTA MESMA MÁQUINA (Maven,
+          # npm, Testcontainers e o scanner, todos juntos), o Sonar respondia —
+          # só que devagar. O kubelet leu lento como morto:
+          #
+          #   Startup probe failed: context deadline exceeded
+          #     (Client.Timeout exceeded while awaiting headers)
+          #   Container sonarqube failed startup probe, will be restarted
+          #   exitCode 137
+          #
+          # ⚠️ E o reinício PIORA: matar um JVM a meio caminho da subida faz a
+          # próxima tentativa começar do zero, competindo pela mesma CPU. O pod
+          # entrou em laço, o Service tirou o pod da rota, o nginx passou a
+          # devolver 502/503 — e o `sonar-scanner` da própria esteira falhou com
+          # "Failed to query server version: HTTP 502". A build derrubou o
+          # servidor de que a build precisava.
+          #
+          # `failureThreshold` conta TENTATIVAS; `timeoutSeconds` é quanto vale
+          # a pena esperar por cada uma. Ajustar um sem o outro não protege de
+          # lentidão — só de silêncio total.
+          #
+          # ⚠️ 10s aqui não atrasa nada quando está tudo bem: a sonda retorna
+          # assim que a resposta chega. O número só é gasto quando a máquina
+          # está afogada, que é exatamente quando NÃO se quer reiniciar nada.
           startupProbe:
             httpGet:
               path: /api/system/status
               port: http
             periodSeconds: 10
+            timeoutSeconds: 10
             failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /api/system/status
               port: http
             periodSeconds: 15
-            failureThreshold: 4
+            timeoutSeconds: 10
+            # ⚠️ 4 × 15s dava 1 minuto de lentidão para o pod sair da rota e o
+            # gateway começar a devolver 502. Sob CI concorrente isso acontece
+            # sem que nada esteja quebrado. 8 dá dois minutos.
+            failureThreshold: 8
           livenessProbe:
             httpGet:
               path: /api/system/status
               port: http
             periodSeconds: 30
+            timeoutSeconds: 10
             failureThreshold: 6
 
           resources:
