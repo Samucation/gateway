@@ -37,15 +37,30 @@ api -X POST "$J/job/$PROJ/job/main/build?delay=0" -o /dev/null
 # numero quando sai da fila. Perguntar o resultado antes disso le o build
 # ANTERIOR e conclui o oposto do que aconteceu.
 echo -n "  esperando entrar na fila"
+NOVO=nao
 for _ in $(seq 1 30); do
   AGORA=$(api "$J/job/$PROJ/job/main/lastBuild/api/json?tree=number" \
     | sed -n 's/.*"number":\([0-9]*\).*/\1/p')
-  [ -n "$AGORA" ] && [ "$AGORA" != "$ANTES" ] && break
+  if [ -n "$AGORA" ] && [ "$AGORA" != "$ANTES" ]; then NOVO=sim; break; fi
   echo -n "."
   sleep 10
 done
 echo
-echo "  build #${AGORA:-?} começou"
+
+# 🐞 Aqui se anunciava "build #N começou" MESMO quando o numero nao tinha
+# mudado -- ou seja, quando nenhum build novo entrou. O conferidor afirmava o
+# que nao tinha verificado, e o relatorio dizia que o disparo funcionou.
+#
+# Acontece de verdade: se o push ja disparou o build automaticamente, o de
+# agora e recusado como duplicado e o numero fica o mesmo. Acompanhar o build
+# que ja estava rodando costuma ser o certo -- mas quem le precisa SABER que
+# foi isso, e nao supor que o disparo criou um.
+if [ "$NOVO" = "sim" ]; then
+  echo "  build #${AGORA} começou (novo)"
+else
+  echo "  ⚠️ nenhum build NOVO entrou na fila — o numero seguiu #${AGORA:-?}."
+  echo "     Provavelmente o push ja o tinha disparado. Vou acompanhar ESTE."
+fi
 
 echo -n "  acompanhando"
 FIM=$((SECONDS + ESPERA_MIN * 60))
@@ -59,6 +74,15 @@ echo
 
 RESULTADO=$(api "$J/job/$PROJ/job/main/lastBuild/api/json?tree=result" \
   | sed -n 's/.*"result":"\([A-Z_]*\)".*/\1/p')
-echo "  resultado: ${RESULTADO:-AINDA RODANDO}"
 
+if [ -z "$RESULTADO" ]; then
+  # ⚠️ "sem resultado" NAO e falha -- e "ainda esta rodando", e a diferenca
+  # importa: sair 1 aqui faz quem chamou concluir que o build QUEBROU quando
+  # o que houve foi a espera acabar antes dele. Ja aconteceu.
+  echo "  ⏳ ainda rodando depois de ${ESPERA_MIN} min — a espera acabou, o build nao."
+  echo "     Veja onde ele esta:  bash estado-dos-estagios.sh $PROJ"
+  exit 2
+fi
+
+echo "  resultado: $RESULTADO"
 [ "$RESULTADO" = "SUCCESS" ] || exit 1
