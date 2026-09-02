@@ -3,6 +3,20 @@
 #
 #     bash disparar-e-acompanhar.sh <projeto> [minutos-de-espera]
 #
+# ⚠️ CHAME PELO PowerShell, e NUNCA pelo Git Bash do Windows:
+#
+#     wsl -d prd -u root -- bash /mnt/e/.../disparar-e-acompanhar.sh live-flow
+#
+# 🐞 02/09/2026: chamado do Git Bash, o caminho `/mnt/e/...` foi reescrito para
+# `C:/Program Files/Git/mnt/e/...` e o comando morreu em "No such file or
+# directory" -- E SAIU COM CODIGO 0. Quem chamou concluiu que o build tinha
+# sido disparado e acompanhado ate o fim. Nao tinha sido disparado nada.
+#
+# ⚠️ Falso VERDE e pior que falso vermelho: o vermelho manda investigar, o
+# verde manda seguir em frente. Este cabecalho existe porque a mensagem de erro
+# apareceu na saida e mesmo assim o codigo foi 0 -- ninguem le a saida de um
+# comando que "deu certo".
+#
 # ⚠️ REINDEXA ANTES de disparar, e a ordem importa.
 #
 # 🐞 Num multibranch o Jenkins constroi o commit que esta no INDICE dele, e nao
@@ -11,6 +25,14 @@
 # voce quer testar. O sintoma e cruel: parece que a sua mudanca nao teve efeito
 # nenhum.
 set -uo pipefail
+
+# ⚠️ A prova de que o script REALMENTE rodou.
+#
+# Se o caminho for reescrito e o arquivo nao existir, o bash falha antes desta
+# linha e nada e impresso -- mas quem chama pode nao notar, porque a saida some
+# no meio de outras. Imprimir a identificacao no inicio da uma marca clara: sem
+# esta linha na saida, o script NAO executou, por mais que o codigo seja 0.
+echo "== disparar-e-acompanhar.sh =="
 
 J=http://127.0.0.1:8080
 U=samuca
