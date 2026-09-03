@@ -38,14 +38,28 @@ case "$acao" in
   disparar)
     [ -n "$proj" ] || { echo "  falta o projeto"; exit 2; }
     c=$(crumb)
+    # ---- A SEGUNDA VIA (02/09/2026) ----
+    #
+    # Pedido do dono: disparo POR AQUI vai ate producao sozinho; disparo pela
+    # TELA do Jenkins continua parando no portao e esperando ele.
+    #
+    # ⚠️ Quem faz essa distincao e o parametro `PROMOVER_AUTO`, que SO este
+    # comando envia. O padrao no Jenkinsfile e `false`, entao tela, push e
+    # webhook seguem exigindo gente -- sem ninguem precisar lembrar de nada.
+    #
     # 🐞 Job COM parametro exige `/buildWithParameters`; sem parametro,
     # `/build`. Trocar os dois devolve 400 -- e o 400 so recusa, nao diz o que
-    # faltou. O `gateway` tem parametro, e era por isso que ele nao disparava.
+    # faltou. Por isso a tentativa COM parametro vem primeiro e o `/build` fica
+    # de reserva: job que ainda nao conhece `PROMOVER_AUTO` (a primeira build
+    # depois desta mudanca, e os projetos que nao tem o parametro) continua
+    # disparando normal, so que sem a via direta.
     cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -X POST \
-          -u "$U:$T" -H "$c" "$J/job/$proj/job/main/build")
-    if [ "$cod" = "400" ]; then
+          -u "$U:$T" -H "$c" \
+          "$J/job/$proj/job/main/buildWithParameters?PROMOVER_AUTO=true")
+    if [ "$cod" = "400" ] || [ "$cod" = "404" ]; then
+      echo "  (este job ainda nao conhece PROMOVER_AUTO — disparo sem a via direta)"
       cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 -X POST \
-            -u "$U:$T" -H "$c" "$J/job/$proj/job/main/buildWithParameters")
+            -u "$U:$T" -H "$c" "$J/job/$proj/job/main/build")
     fi
     echo "  $proj -> http $cod"
     ;;
