@@ -131,6 +131,28 @@ function Subir-Distro {
 }
 
 # ---------------------------------------------------------------------------
+function Limpar-HostPortMorto {
+    # 🐞 REGRA DE NAT SOBRANDO DERRUBA O CLUSTER INTEIRO (04/09/2026).
+    #
+    # Ao reiniciar a distro, o `portmap` escreve uma cadeia CNI-DN-* nova para
+    # cada hostPort e nem sempre remove a antiga. A velha fica ANTES da nova em
+    # CNI-HOSTPORT-DNAT, entao e ela que atende -- mandando o trafego para o IP
+    # de um Pod que ja morreu.
+    #
+    # ⚠️ Na 32000 isso tira o REGISTRO do ar, e sem registro toda imagem nossa
+    # falha: o cluster inteiro vai a ImagePullBackOff. Parece defeito em cada
+    # aplicacao, e e uma linha de iptables.
+    #
+    # Tem que rodar AQUI, no boot, porque e exatamente o reinicio que a produz.
+    $s = '/mnt/e/Desenvolvimento/Dev/Workspace/gateway/estacao/prd-wsl/limpar-hostport-morto.sh'
+    $saida = (& wsl.exe -d $Distro -u root -- bash $s 2>&1 | Out-String)
+    foreach ($l in ($saida -split "`n")) {
+        if ($l.Trim()) { Diga "  $($l.TrimEnd())" }
+    }
+    return ($LASTEXITCODE -eq 0)
+}
+
+# ---------------------------------------------------------------------------
 function Refazer-Portas {
     # 🐞 `hostname -I`, e nao `ip addr | awk`.
     #
@@ -189,6 +211,10 @@ if ($Instalar) { Instalar-Tarefa; exit 0 }
 
 Diga "== producao WSL, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') =="
 $ok = Subir-Distro
+# Antes de mexer nas portas do Windows: limpa o NAT de dentro. Nao adianta
+# mapear 127.0.0.1:32000 para a distro se, la dentro, a 32000 aponta para um
+# Pod morto -- o mapeamento ficaria "certo" entregando em nada.
+$ok = (Limpar-HostPortMorto) -and $ok
 $ok = (Refazer-Portas) -and $ok
 
 # A prova final é o que o usuário veria: o Kong respondendo pela porta do
