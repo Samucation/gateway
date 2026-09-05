@@ -47,9 +47,14 @@ vivos=0
 # Ponte que ninguém remove vira caminho oficial, e no dia da mudança de IP da
 # estação alguém descobre que metade do tráfego passava por aqui.
 #
-# Os quatro que sobraram são de outra natureza: motores que SEMPRE viveram na
-# estação (GPU, voz) e não têm por que entrar no cluster.
-declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 )
+# Os que sobraram são de outra natureza: motores que SEMPRE viveram na
+# estação (GPU, voz, texto) e não têm por que entrar no cluster.
+#
+# `ollama` entrou em 05/09/2026, quando o robô do chat do Urupix passou a
+# precisar de TEXTO e não só de voz. Até então a porta dele estava em
+# `127.0.0.1` e por isso `OLLAMA_URL` ficava vazia no cluster — o motor da
+# Central subia sem destino de conversa e recusava todo pedido de texto.
+declare -A PORTAS=( [sandbox-sigma]=3201 [chatterbox]=8004 [kokoro]=8880 [whisper]=8040 [ollama]=11434 )
 for nome in "${!PORTAS[@]}"; do
   p=${PORTAS[$nome]}
   cod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$IP:$p/" 2>/dev/null)
