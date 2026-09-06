@@ -1,0 +1,71 @@
+# ===========================================================================
+# TUNEL DO REGISTRO PARA O AGENTE MAC
+#
+#   Instalar (na distro `prd`):
+#     cp tunel-registro.service /etc/systemd/system/
+#     systemctl daemon-reload
+#     systemctl enable --now tunel-registro
+#
+# ---------------------------------------------------------------------------
+# O QUE ELE FAZ, E POR QUE ASSIM
+# ---------------------------------------------------------------------------
+# Encaminhamento REVERSO: cria no Mac um `127.0.0.1:32000` que desemboca no
+# registro desta maquina, pela mesma direcao que o Jenkins ja' usa para
+# alcancar o agente.
+#
+# A alternativa seria ligar `sshd` aqui e o Mac abrir o tunel para ca'. Esta
+# forma e' melhor porque:
+#
+#   * NAO precisa de sshd na `prd` -- nenhum servico novo escutando;
+#   * NAO expoe o registro na LAN;
+#   * a porta no Mac nasce em 127.0.0.1 (`GatewayPorts no` e' o padrao),
+#     entao nem o Mac a republica.
+#
+# ⚠️ E o endereco visto no Mac e' `localhost:32000`, EXATAMENTE o que os
+# manifestos ja' usam (`localhost:32000/veltrixa-api:...`). Nao ha' nome novo
+# para manter igual dos dois lados -- que e' onde esse tipo de arranjo
+# costuma apodrecer.
+#
+# ⚠️ Docker trata `localhost` como registro INSEGURO por padrao, entao HTTP
+# sem TLS funciona sem configurar nada no Mac. Com qualquer outro nome seria
+# preciso mexer em `insecure-registries` -- e isso se esquece.
+# ===========================================================================
+[Unit]
+Description=Tunel reverso do registro (32000) para o agente Mac de CI
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+User=jenkins
+Type=simple
+
+# ⚠️ `ExitOnForwardFailure=yes` e' ESSENCIAL. Sem ele, se a porta 32000 ja'
+# estiver ocupada no Mac o ssh conecta, avisa no log e FICA VIVO sem o
+# encaminhamento -- o servico aparece `active (running)` e os builds falham
+# em "connection refused". Servico verde com tunel morto e' pior que servico
+# vermelho.
+#
+# ⚠️ `-N` (nao executa comando) e `-T` (sem terminal): isto e' um cano, nao
+# uma sessao.
+ExecStart=/usr/bin/ssh -N -T \
+    -o BatchMode=yes \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ConnectTimeout=20 \
+    -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=/var/lib/jenkins/.ssh/known_hosts \
+    -i /var/lib/jenkins/.ssh/ci-mac \
+    -R 32000:localhost:32000 \
+    samuelferreiraduarte@192.168.15.25
+
+# O Mac dorme, troca de rede, reinicia. Cair e' o normal aqui; o que nao pode
+# e' ficar caido.
+Restart=always
+RestartSec=15
+
+# Nao inundar o journal quando o Mac estiver desligado a noite inteira.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target
