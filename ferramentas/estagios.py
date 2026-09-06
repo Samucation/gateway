@@ -792,6 +792,56 @@ PORTAO = """
 """
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# O PROJETO QUE NAO TEM PRODUCAO
+#
+# ⚠️ Nem todo projeto desta lista roda em producao, e fingir que sim custa caro.
+#
+# 🐞 06/09/2026: a esteira do `sigma-payments` passou em TUDO -- testes Java,
+# Sonar, portao de qualidade, publicar, promocao aprovada -- e morreu no ultimo
+# estagio, em ZERO segundo:
+#
+#     sed: can't read k8s/overlays/prd/kustomization.yaml
+#
+# O repositorio so tem overlay de `hmg`, e nao existe namespace
+# `sigma-payments` no cluster de producao. O projeto nunca esteve la. O estagio
+# nao encontrou um arquivo porque o arquivo nao deveria existir.
+#
+# ⚠️ E "consertar" ali seria o pior desfecho possivel: criar o overlay faria a
+# esteira IMPLANTAR, pela primeira vez, um prototipo aposentado -- com Postgres,
+# Kafka, Keycloak e WireMock -- na mesma maquina que roda o servico de dinheiro.
+# Um estagio vermelho vira sete cargas novas em producao, para deixar a lista
+# verde.
+#
+# Entao a esteira passa a dizer a verdade: quem declara `sem_prd=True` termina
+# em homologacao. Constroi, testa, analisa e PUBLICA a imagem -- so nao implanta
+# onde nunca esteve. O estagio existe e e visivel, para ninguem confundir
+# "terminou verde" com "foi para producao", e o dia em que houver producao e so
+# tirar a marca.
+# ---------------------------------------------------------------------------
+SEM_PRODUCAO = """
+        stage('Producao') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    echo "======================================================"
+                    echo " ESTE PROJETO NAO TEM PRODUCAO -- e isso e proposital."
+                    echo "======================================================"
+                    echo
+                    echo " A imagem FOI construida, testada, analisada e publicada"
+                    echo " no registro. Ela simplesmente nao e implantada em"
+                    echo " producao, porque este projeto nao roda la:"
+                    echo "   - o repositorio nao tem k8s/overlays/prd;"
+                    echo "   - nao ha namespace dele no cluster de producao."
+                    echo
+                    echo " Para religar: criar o overlay de prd e tirar"
+                    echo " sem_prd=True do gerador (gateway/ferramentas)."
+                '''
+            }
+        }
+"""
+
+# ---------------------------------------------------------------------------
 # A PROMOCAO PARA PRODUCAO
 #
 # ⚠️ `agent none` no estagio do `input`. Sem isso a espera SEGURA um executor --

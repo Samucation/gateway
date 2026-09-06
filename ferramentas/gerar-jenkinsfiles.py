@@ -161,7 +161,19 @@ PROJETOS = [
                 ('sigma-midia.hmg', '/api/v1/ativos', '401'),
                 ('sigma-midia-arquivos-hmg.cursodetecnologia.dev.br', '/sigma-midia/', '403')]),
 
-    dict(dir='sigma-payments', sonar='maven', ns='sigma-payments',
+    # ⚠️ `sem_prd`: este projeto NAO roda em producao, e a esteira precisa dizer
+    # isso em vez de tentar implantar.
+    #
+    # Ele e o prototipo Java de adquirencia, superado pelo `sigma-financeiro`
+    # (Node), que e quem move dinheiro. O repositorio tem `k8s/overlays/hmg` e
+    # nao tem `prd`; o cluster de producao nao tem namespace dele.
+    #
+    # 🐞 Sem esta marca, o ultimo estagio morria em ZERO segundo com
+    # `sed: can't read k8s/overlays/prd/kustomization.yaml` -- um vermelho que
+    # convida ao conserto errado: criar o overlay implantaria em producao, pela
+    # primeira vez, um prototipo aposentado com Postgres, Kafka, Keycloak e
+    # WireMock, na mesma maquina do servico de dinheiro.
+    dict(dir='sigma-payments', sonar='maven', ns='sigma-payments', sem_prd=True,
          imagens=[('sigma-payments', '-t {REG}/sigma-payments:$TAG .'),
                   ('sigma-payments-ops-api', '-f Dockerfile.ops-api -t {REG}/sigma-payments-ops-api:$TAG .'),
                   ('sigma-payments-ops-ui', '-t {REG}/sigma-payments-ops-ui:$TAG ./sigma-payments-ops-ui')],
@@ -854,8 +866,14 @@ for p in PROJETOS:
 
     partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
 
+    # ⚠️ Projeto sem producao termina em homologacao, com um estagio que DIZ
+    # isso. Ver a nota do `SEM_PRODUCAO` em estagios.py: um estagio de prd que
+    # falha por falta de manifesto convida a criar o manifesto -- e ai a esteira
+    # implanta em producao um projeto que nunca esteve la.
+    promocao = estagios.SEM_PRODUCAO if p.get('sem_prd') else estagios.PROMOCAO
+
     partes.append(RODAPE.format(esperas=esperas, checagens=checagens,
-                                promocao=estagios.PROMOCAO))
+                                promocao=promocao))
 
     texto = ''.join(partes)
     assert '\\' not in texto, '%s: contrabarra no Jenkinsfile quebra o Groovy' % p['dir']
