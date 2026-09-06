@@ -494,11 +494,40 @@ SONAR_MAVEN = """
                         # perguntar, e o Testcontainers reporta isso como se a
                         # imagem nao existisse.
                         #
-                        # `-v /var/run/docker.sock` entrega o daemon do HOST. Nao
-                        # e privilegio novo nesta esteira -- ela ja roda
+                        # =========================================================
+                        # ⚠️ DAQUI ATE O FIM DESTE BLOCO E HISTORIA, NAO RECEITA
+                        # =========================================================
+                        # A saida daquela vez foi montar `/var/run/docker.sock` e
+                        # fixar a versao da API. Estava CERTA -- para a VM, que
+                        # tinha Docker 29.
+                        #
+                        # 🐞 Em 24/08/2026 a producao virou a distro WSL2 `prd`, que
+                        # roda containerd/nerdctl: ali o `docker` e um involucro
+                        # (`nerdctl --address /run/k3s/containerd/containerd.sock`)
+                        # e `/var/run/docker.sock` NAO EXISTE. O socket montado
+                        # virou um arquivo vazio, e o erro voltou ao ponto de
+                        # partida -- com o Jenkinsfile ainda explicando a solucao.
+                        #
+                        # ⚠️ A licao nao e sobre Docker: e que guarda e receita
+                        # descrevem um MUNDO, e mundo muda. Esta ficou seis meses
+                        # correta e um dia deixou de ser, sem nada no texto avisando.
+                        #
+                        # HOJE a esteira sobe o Postgres ELA MESMA (logo abaixo) e
+                        # entrega o endereco por variavel de ambiente. Nao depende
+                        # de API de Docker nenhuma, entao vale igual em containerd,
+                        # em Docker, e no que vier depois.
+                        #
+                        # O historico fica porque a proxima pessoa que ler
+                        # "Can't get Docker image" precisa saber que a mensagem
+                        # fala da IMAGEM e o problema e o SOCKET.
+                        #
+                        # ---- o que valia na VM, e nao vale mais: -----------------
+                        #
+                        # `-v /var/run/docker.sock` entregava o daemon do HOST. Nao
+                        # era privilegio novo nesta esteira -- ela ja rodava
                         # `docker build` direto, com o mesmo daemon. E com
                         # `--network host` os conteineres que o Testcontainers
-                        # sobe ficam alcancaveis por `localhost`, que e onde o
+                        # subia ficavam alcancaveis por `localhost`, que e onde o
                         # teste os procura.
                         #
                         # 🐞 E `DOCKER_API_VERSION` NAO E OPCIONAL.
@@ -570,13 +599,83 @@ SONAR_MAVEN = """
                         # import POM". Antes de trocar versao, conferir o que esta
                         # publicado.
                         #
-                        # `DOCKER_HOST` fica porque e correto e barato: aponta o
-                        # socket explicitamente, em vez de deixar adivinhar.
-                        echo "api.version=1.44" > docker-java.properties
+                        # ---- fim do historico ------------------------------------
+                        #
+                        # ⚠️ O `docker-java.properties` e o `DOCKER_HOST` SAIRAM da
+                        # linha do Maven. Sem socket para apontar, eles nao
+                        # resolviam nada e ainda faziam quem lesse acreditar que o
+                        # Testcontainers estava configurado.
+                        # ---- o Postgres que o teste de contexto precisa --------
+                        #
+                        # A ESTEIRA sobe o banco, e o teste o recebe pronto. E o
+                        # mesmo arranjo do molde de Node, e pela mesma razao: aqui
+                        # nao ha API do Docker para o Testcontainers usar.
+                        #
+                        # ⚠️ Porta 15433, e nao 15432: aquela e a do molde de Node.
+                        # Duas esteiras nunca rodam juntas neste Jenkins de um
+                        # executor so, mas um conteiner deixado para tras por uma
+                        # build morta SEGURA A PORTA -- e o sintoma seria "o banco
+                        # nao subiu em 60 segundos", falando do banco novo em vez do
+                        # velho.
+                        #
+                        # O nome comeca com `pg-teste`, que e o filtro que o
+                        # `post always` usa para limpar. Fora desse prefixo, o
+                        # conteiner sobreviveria a build e ninguem saberia.
+                        PGJ=pg-teste-java-$BUILD_NUMBER
+                        PGJP=15433
+                        for velho in $(docker ps -aq --filter name=pg-teste-java 2>/dev/null); do
+                            docker rm -fv "$velho" >/dev/null 2>&1 || true
+                        done
+
+                        # 🐞 Baixa a imagem ANTES, com repeticao: o `Preparo` roda
+                        # `docker image prune -af` para caber no disco, e isso apaga
+                        # o `postgres:16-alpine`. Uma baixa interrompida deixa o
+                        # armazem local pela metade, e o erro fala de digest.
+                        if ! docker pull postgres:16-alpine >/dev/null 2>&1; then
+                            docker image rm postgres:16-alpine >/dev/null 2>&1 || true
+                            docker pull postgres:16-alpine >/dev/null 2>&1 || {
+                                echo "ERRO: nao consegui baixar postgres:16-alpine"; exit 1;
+                            }
+                        fi
+
+                        docker run -d --name $PGJ --network host -e POSTGRES_USER=teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=postgres postgres:16-alpine -c port=$PGJP >/dev/null
+
+                        # `pg_isready`, e nao porta TCP: a porta abre ANTES de o
+                        # Postgres aceitar conexao, e quem conectasse no intervalo
+                        # tomaria erro num servidor ja dado como pronto.
+                        pronto=0
+                        for i in $(seq 1 30); do
+                            if docker exec $PGJ pg_isready -U teste -p $PGJP >/dev/null 2>&1; then pronto=1; break; fi
+                            sleep 2
+                        done
+                        if [ "$pronto" != "1" ]; then
+                            echo "ERRO: o Postgres de teste nao subiu em 60 segundos"
+                            docker logs $PGJ 2>&1 | tail -10
+                            docker rm -fv $PGJ >/dev/null 2>&1 || true
+                            exit 1
+                        fi
 
                         # `jacoco:report` explicito porque o POM prende o relatorio
                         # ao `verify`, que nao acontece num `mvn test`.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v /var/run/docker.sock:/var/run/docker.sock -e DOCKER_HOST=unix:///var/run/docker.sock -v "$PWD/docker-java.properties:/root/.docker-java.properties:ro" -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt
+                        #
+                        # ⚠️ `--network host` faz o `127.0.0.1` de dentro do
+                        # conteiner do Maven ser o mesmo da maquina -- que e onde o
+                        # Postgres acima esta escutando.
+                        #
+                        # ⚠️ Nada de `|| true`: teste que falha TEM que reprovar o
+                        # build. O banco e removido logo abaixo E no `post always`,
+                        # que e a rede de seguranca para o caso de este passo
+                        # morrer no meio.
+                        if docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -e SIGMA_TEST_PG_HOST=127.0.0.1 -e SIGMA_TEST_PG_PORT=$PGJP -e SIGMA_TEST_PG_DB=postgres -e SIGMA_TEST_PG_USER=teste -e SIGMA_TEST_PG_PASSWORD=teste -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt; then
+                            ok=1
+                        else
+                            ok=0
+                            echo "==================== o banco de teste disse ===================="
+                            docker logs $PGJ 2>&1 | tail -30
+                            echo "==============================================================="
+                        fi
+                        docker rm -fv $PGJ >/dev/null 2>&1 || true
+                        [ "$ok" = "1" ] || exit 1
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''

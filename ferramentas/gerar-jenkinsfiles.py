@@ -52,6 +52,30 @@ isso ele e o unico que nao implanta sozinho na `main` -- exige marcar um
 parametro ao disparar. Um gateway que se republica a cada commit transformaria
 um ajuste de comentario numa queda geral.
 """
+# ---------------------------------------------------------------------------
+# 🔴 ANTES DE COMMITAR O QUE ESTE GERADOR ESCREVE: OLHE O `git diff` DE CADA UM
+# ---------------------------------------------------------------------------
+# Ele reescreve os oito Jenkinsfiles, e DOIS deles tem correcao feita a mao que
+# nao esta aqui. Regenerar e commitar sem olhar as APAGA:
+#
+#   live-flow  ->  `PROMOVER_AUTO` + `catch (FlowInterruptedException)` no portao
+#                  de promocao. Sem isso, "ninguem clicou" volta a virar FAILURE
+#                  identico a "o codigo quebrou" -- e o `esteira.sh disparar`
+#                  perde a via direta, porque e esse parametro que a distingue.
+#   opuschat   ->  promocao direta (`r = [quem: 'pipeline-direct-prd', ...]`),
+#                  que pula o portao humano de proposito.
+#
+# 🐞 Medido em 06/09/2026: uma regeneracao para mexer SO no molde Java saiu com
+# `live-flow  +12 -310` e `opuschat +1 -5`. As duas seriam perda pura, e nada no
+# resultado diria isso -- o diff do projeto que voce queria mudar parece certo.
+#
+# ⚠️ A divida real e essa deriva: enquanto as duas correcoes nao subirem PARA CA,
+# toda regeneracao e uma armadilha. Consertar de verdade e trazer o
+# `PROMOVER_AUTO` para o molde -- e ai os oito ganham a correcao junto.
+#
+# Enquanto isso, a regra e: regenerar, conferir projeto a projeto, e commitar
+# so o que voce quis mudar.
+# ---------------------------------------------------------------------------
 import io
 import os
 import sys
