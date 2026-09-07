@@ -99,6 +99,25 @@ def aplicar(caminho):
         print('  NAO achei o inicio do deploy -- revisar a mao')
         return False
 
+    # 3.5) construir/publicar imagem FICAM na estacao
+    #
+    # 🐞 Nestes dois projetos os estagios de imagem ficam ENTRE os testes
+    # (Preparo -> Construir -> Sonar -> Portao -> Publicar), entao nao da'
+    # para separa-los por um pai `IMAGEM` sem reordenar -- e reordenar
+    # arquivo com correcao feita a mao e' pedir para perder alguma.
+    #
+    # A saida e' fixar o agente EM CADA UM. Vale porque estes dois tem UMA
+    # imagem so', sem `parallel` -- e o Jenkins recusa `agent` em estagio que
+    # contem `parallel`.
+    #
+    # ⚠️ Sem isto, `docker build` iria para o Mac (arm64) e cairia na
+    # emulacao, que em 07/09/2026 derrubou o daemon do Docker de la' duas
+    # vezes, apos 103 e 88 minutos.
+    for est in ("        stage('Construir') {\n", "        stage('Publicar') {\n"):
+        if est in s:
+            s = s.replace(est, est + "            // imagem NAO sai da estacao: no Mac isto seria emulado.\n"
+                                     "            agent { label 'built-in' }\n", 1)
+
     # 4) fecha CD antes do post
     alvo_post = "\n    post {"
     i = s.rindex(alvo_post)

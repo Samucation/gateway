@@ -639,13 +639,42 @@ RODAPE = """
     }}
 
     post {{
+        // ===================================================================
+        // 🐞 O `post` RODA SEM NO' -- e com `agent none` isso e' FATAL
+        // ===================================================================
+        // Os `sh` daqui precisam de contexto de sistema de arquivos. Enquanto
+        // o topo era `agent any`, o no' do pipeline ainda existia quando o
+        // `post` rodava. Com `agent none` nao existe mais, e o Jenkins derruba
+        // a build com:
+        //
+        //   Attempted to execute a step that requires a node context while
+        //   'agent none' was specified.
+        //
+        // ⚠️ E essa excecao vira a MENSAGEM PRINCIPAL da build: uma limpeza
+        // que falhou passa a esconder (ou a substituir) a causa real. Medido
+        // em 07/09/2026, na primeira build do sigma-payments com a esteira
+        // partida -- ela FALHOU por causa do `post`, com todos os estagios de
+        // verdade tendo passado.
+        //
+        // ⚠️ E `node('')` NAO e' a saida: envolver o post num no' faz ele
+        // DISPUTAR a fila depois de a build ter terminado, e com um executor
+        // so' isso trava as outras esteiras. Ja' aconteceu no cartorio.
+        //
+        // Entao: `try/catch`. Se nao houver no', avisa e segue -- limpeza e'
+        // desejavel, derrubar a build por causa dela nao.
         failure {{
             // Num pipeline que falhou o que se quer ver e o estado real do
             // cluster, nao o log do Jenkins, que ja foi lido.
-            sh '''
-                $KUBECTL get pods -n $NS || true
-                $KUBECTL get events -n $NS --sort-by=.lastTimestamp 2>/dev/null | tail -20 || true
-            '''
+            script {{
+                try {{
+                    sh '''
+                        $KUBECTL get pods -n $NS || true
+                        $KUBECTL get events -n $NS --sort-by=.lastTimestamp 2>/dev/null | tail -20 || true
+                    '''
+                }} catch (e) {{
+                    echo "aviso: nao consegui ler o cluster no post (${{e.message}})"
+                }}
+            }}
         }}
         always {{
             // ⚠️ CADA BUILD LIMPA O QUE SUJOU. Sem isto o disco enche em uma
@@ -661,8 +690,14 @@ RODAPE = """
             // serve aqui: o cache que enche o disco e justamente o das ultimas
             // horas. Com 2 GB o build seguinte do mesmo projeto ainda aproveita
             // camada, e o crescimento fica limitado.
-            sh 'docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true'
-            sh 'docker builder prune -f --keep-storage=2GB >/dev/null 2>&1 || true'
+            script {{
+                try {{
+                    sh 'docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true'
+                    sh 'docker builder prune -f --keep-storage=2GB >/dev/null 2>&1 || true'
+                }} catch (e) {{
+                    echo "aviso: a limpeza pos-build nao rodou (${{e.message}})"
+                }}
+            }}
 
             // ⚠️ Os Postgres de teste, aconteca o que acontecer.
             //
@@ -674,7 +709,13 @@ RODAPE = """
             //
             // Foi o que derrubou o build #8 do live-flow: o `pg-teste-7`
             // continuava no ar. Aqui e o unico lugar que roda sempre.
-            sh 'for c in $(docker ps -aq --filter name=pg-teste 2>/dev/null); do docker rm -f "$c" >/dev/null 2>&1 || true; done'
+            script {{
+                try {{
+                    sh 'for c in $(docker ps -aq --filter name=pg-teste 2>/dev/null); do docker rm -f "$c" >/dev/null 2>&1 || true; done'
+                }} catch (e) {{
+                    echo "aviso: nao consegui varrer os Postgres de teste (${{e.message}})"
+                }}
+            }}
         }}
     }}
 }}
@@ -719,7 +760,7 @@ ABRE_IMAGEM = '''
 '''
 
 for p in PROJETOS:
-    partes = [CABECALHO.format(dir=p['dir'], reg=REG, ns=p['ns']), ABRE_IMAGEM]
+    partes = [CABECALHO.format(dir=p['dir'], reg=REG, ns=p['ns'])]
 
     # Estagio extra: buscar o repositorio irmao, quando houver.
     if p.get('extra_checkout'):
@@ -1017,7 +1058,19 @@ for p in PROJETOS:
             'tag': 'esteira-' + p['dart_imagem'].replace(':', '-').replace('.', '-'),
         }
 
-    partes.insert(len(partes) - 1, testes + sonar + estagios.PORTAO)
+    # ⚠️ ORDEM: testar ANTES de construir a imagem.
+    #
+    # Ate' 07/09/2026 os testes entravam depois do `Construir` (eram inseridos
+    # antes do `Publicar`). Isso os prendia dentro do estagio `IMAGEM`, que
+    # roda no `built-in` -- ou seja, so' o `Preparo` iria para o agente Mac, e
+    # a divisao de trabalho nao aconteceria de verdade.
+    #
+    # Testar antes tambem e' a ordem convencional: nao ha' motivo para gastar
+    # uma construcao de imagem quando o teste vai reprovar. E nenhum dos
+    # estagios de teste depende da imagem -- todos rodam sobre o CODIGO, em
+    # conteiner proprio (maven, node, dart).
+    partes.insert(1, testes + sonar + estagios.PORTAO)
+    partes.insert(2, ABRE_IMAGEM)
 
     # ⚠️ Projeto sem producao termina em homologacao, com um estagio que DIZ
     # isso. Ver a nota do `SEM_PRODUCAO` em estagios.py: um estagio de prd que

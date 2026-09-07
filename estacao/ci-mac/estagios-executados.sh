@@ -14,7 +14,7 @@ cat > /tmp/ee.groovy <<GROOVY
 import jenkins.model.Jenkins
 def b = Jenkins.instance.getItemByFullName('$JOB')?.getLastBuild()
 def s = new StringBuilder()
-def l = b.getLog(6000)
+def l = b.getLog(40000)
 def atual = null
 def pulado = [:]
 def ordem = []
