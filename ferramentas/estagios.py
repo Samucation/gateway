@@ -404,7 +404,28 @@ SONAR_GENERICO = """
                         #
                         # O proprio scanner imprime a URL da tarefa; ler dali nao
                         # depende de permissao nenhuma.
-                        docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" $ARGS_TESTE -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
+                        # ===========================================================
+                        # 🐞 O ENDERECO DE `sonar.hmg` MUDA CONFORME O AGENTE
+                        # ===========================================================
+                        # Na estacao, `127.0.0.1` dentro do conteiner com
+                        # `--network host` e' o proprio no', onde o Kong atende.
+                        #
+                        # No macOS NAO funciona, e a falha engana:
+                        #   curl, da MESMA imagem, para 127.0.0.1:8050 -> 200
+                        #   o scanner (Java)  -> java.net.ConnectException: null
+                        #
+                        # `curl` usa conexao BLOQUEANTE e atravessa o repasse de
+                        # loopback do OrbStack; o cliente HTTP do Java usa conexao
+                        # ASSINCRONA e nao atravessa. Testar com curl e concluir
+                        # "a rede esta boa" custou tres rodadas em 06/09/2026.
+                        #
+                        # ⚠️ E a excecao do Java vem com mensagem `null`. Sem
+                        # `-Dsonar.verbose` nao ha' o que ler.
+                        case "$(uname -s)" in
+                            Darwin) SONAR_ALVO=host-gateway ;;
+                            *)      SONAR_ALVO=127.0.0.1 ;;
+                        esac
+                        docker run --rm --network host --add-host sonar.hmg:$SONAR_ALVO -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" $ARGS_TESTE -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
@@ -666,7 +687,28 @@ SONAR_MAVEN = """
                         # build. O banco e removido logo abaixo E no `post always`,
                         # que e a rede de seguranca para o caso de este passo
                         # morrer no meio.
-                        if docker run --rm --network host --add-host sonar.hmg:127.0.0.1 -e SIGMA_TEST_PG_HOST=127.0.0.1 -e SIGMA_TEST_PG_PORT=$PGJP -e SIGMA_TEST_PG_DB=postgres -e SIGMA_TEST_PG_USER=teste -e SIGMA_TEST_PG_PASSWORD=teste -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt; then
+                        # ===========================================================
+                        # 🐞 O ENDERECO DE `sonar.hmg` MUDA CONFORME O AGENTE
+                        # ===========================================================
+                        # Na estacao, `127.0.0.1` dentro do conteiner com
+                        # `--network host` e' o proprio no', onde o Kong atende.
+                        #
+                        # No macOS NAO funciona, e a falha engana:
+                        #   curl, da MESMA imagem, para 127.0.0.1:8050 -> 200
+                        #   o scanner (Java)  -> java.net.ConnectException: null
+                        #
+                        # `curl` usa conexao BLOQUEANTE e atravessa o repasse de
+                        # loopback do OrbStack; o cliente HTTP do Java usa conexao
+                        # ASSINCRONA e nao atravessa. Testar com curl e concluir
+                        # "a rede esta boa" custou tres rodadas em 06/09/2026.
+                        #
+                        # ⚠️ E a excecao do Java vem com mensagem `null`. Sem
+                        # `-Dsonar.verbose` nao ha' o que ler.
+                        case "$(uname -s)" in
+                            Darwin) SONAR_ALVO=host-gateway ;;
+                            *)      SONAR_ALVO=127.0.0.1 ;;
+                        esac
+                        if docker run --rm --network host --add-host sonar.hmg:$SONAR_ALVO -e SIGMA_TEST_PG_HOST=127.0.0.1 -e SIGMA_TEST_PG_PORT=$PGJP -e SIGMA_TEST_PG_DB=postgres -e SIGMA_TEST_PG_USER=teste -e SIGMA_TEST_PG_PASSWORD=teste -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt; then
                             ok=1
                         else
                             ok=0
@@ -739,7 +781,7 @@ PORTAO = """
                         #    ANTERIOR -- verde de ontem num codigo que quebrou hoje.
                         st=""
                         for i in $(seq 1 60); do
-                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1/api/ce/task?id=$TAREFA" | grep -oE "PENDING|IN_PROGRESS|SUCCESS|FAILED|CANCELED" | head -1)
+                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1:$PORTA_GATEWAY/api/ce/task?id=$TAREFA" | grep -oE "PENDING|IN_PROGRESS|SUCCESS|FAILED|CANCELED" | head -1)
                             case "$st" in
                                 SUCCESS)         break ;;
                                 FAILED|CANCELED) echo "a analise FALHOU no Sonar (estado $st)"; exit 1 ;;
@@ -752,7 +794,7 @@ PORTAO = """
                         fi
 
                         # 2. So AGORA ler o portao.
-                        corpo=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1/api/qualitygates/project_status?projectKey=$SONAR_CHAVE")
+                        corpo=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1:$PORTA_GATEWAY/api/qualitygates/project_status?projectKey=$SONAR_CHAVE")
                         r=$(echo "$corpo" | grep -oE "OK|ERROR|WARN|NONE" | head -1)
                         echo "==> portao de qualidade: ${r:-SEM RESPOSTA}"
                         echo "    detalhes em $SONAR_URL/dashboard?id=$SONAR_CHAVE"
@@ -1038,7 +1080,7 @@ TESTES_DART = """
 FROM %(imagem)s
 RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/* && ln -sf "$(ldconfig -p | awk '/libsqlite3.so.0/ { print $NF; exit }')" /usr/lib/libsqlite3.so
 FIM
-                    docker build -q -t %(tag)s "$CTX" > /dev/null
+                    docker build --platform "${PLATAFORMA:-linux/amd64}" -q -t %(tag)s "$CTX" > /dev/null
                     rm -rf "$CTX"
 
                     for pasta in %(pastas)s; do

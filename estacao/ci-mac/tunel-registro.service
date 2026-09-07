@@ -29,6 +29,23 @@
 # ⚠️ Docker trata `localhost` como registro INSEGURO por padrao, entao HTTP
 # sem TLS funciona sem configurar nada no Mac. Com qualquer outro nome seria
 # preciso mexer em `insecure-registries` -- e isso se esquece.
+#
+# ---------------------------------------------------------------------------
+# A SEGUNDA PORTA (8050) E' O GATEWAY -- e' por ela que o Sonar e' alcancado
+# ---------------------------------------------------------------------------
+# A esteira alcanca o SonarQube com `--add-host sonar.hmg:127.0.0.1` e deixa o
+# Kong rotear pelo cabecalho `Host`. Na estacao isso cai na porta 80; no Mac,
+# 127.0.0.1:80 nao serve nada, e o scanner morria com
+#
+#   Failed to query server version: Call to URL [http://sonar.hmg/...] failed
+#
+# ⚠️ Nao da' para encaminhar a porta 80 do Mac: encaminhamento reverso para
+# porta abaixo de 1024 exigiria que o usuario do ssh fosse root la'.
+#
+# Por isso 8050 nos DOIS mundos: o Kong ja' escuta nela na estacao (conferido:
+# `Host: sonar.hmg` devolve 200 tanto na 80 quanto na 8050), e aqui ela cabe
+# num encaminhamento sem privilegio. Um valor so', sem divergencia entre
+# ambientes -- que e' onde esse tipo de arranjo apodrece.
 # ===========================================================================
 [Unit]
 Description=Tunel reverso do registro (32000) para o agente Mac de CI
@@ -57,6 +74,7 @@ ExecStart=/usr/bin/ssh -N -T \
     -o UserKnownHostsFile=/var/lib/jenkins/.ssh/known_hosts \
     -i /var/lib/jenkins/.ssh/ci-mac \
     -R 32000:localhost:32000 \
+    -R 8050:localhost:8050 \
     samuelferreiraduarte@192.168.15.25
 
 # O Mac dorme, troca de rede, reinicia. Cair e' o normal aqui; o que nao pode

@@ -216,7 +216,33 @@ CABECALHO = """// ==============================================================
 // ele tem este arquivo. Nao ha job criado a mao.
 // ===========================================================================
 pipeline {{
-    agent any
+    // ⚠️ `agent none`: esta esteira roda em DOIS lugares. Construir e testar
+    // podem sair da maquina de producao; implantar NAO pode -- o `kubectl`
+    // daqui fala com o k3s desta distro sem `--kubeconfig`, e de um agente
+    // remoto nao falaria com cluster nenhum.
+    //
+    // Ver os estagios `CI` e `CD` mais abaixo.
+    agent none
+
+    parameters {{
+        // =================================================================
+        // ONDE CONSTRUIR E TESTAR
+        // =================================================================
+        // O padrao DIVIDE o trabalho: `mac-arm || built-in` deixa o Jenkins
+        // escolher quem estiver livre. Se o MacBook estiver dormindo ou fora
+        // da rede, a build cai no built-in e nada para -- ele continua sendo
+        // a rede de seguranca.
+        //
+        // Para forcar um lado: `built-in` ou `mac-arm`.
+        //
+        // ⚠️ O agente Mac e' arm64 e o cluster e' amd64. Quem garante que a
+        // imagem sai amd64 e' o `--platform` no `docker build` -- nao remova.
+        // Sem ele a imagem sai arm64, o `push` sai com zero, o registro
+        // aceita, a esteira fica VERDE e o Pod morre com `exec format error`
+        // horas depois, num lugar que nao aponta para o build.
+        string(name: 'AGENTE_CI', defaultValue: 'mac-arm || built-in',
+               description: "Label do agente para CONSTRUIR e TESTAR. O padrao divide entre os dois.")
+    }}
 
     options {{
         buildDiscarder(logRotator(numToKeepStr: '15'))
@@ -277,7 +303,20 @@ pipeline {{
         // O nome vive no `/etc/hosts` da distro apontando para 127.0.0.1, e
         // quem atende e o Ingress do proprio Sonar pelo Traefik. Mesmo arranjo
         // da VM -- ele estava certo.
-        SONAR_URL   = 'http://sonar.hmg'
+        // ⚠️ PORTA 8050 EXPLICITA, e nao a 80 implicita.
+        //
+        // O Sonar e' alcancado por `--add-host sonar.hmg:...`, deixando o Kong
+        // rotear pelo cabecalho `Host`. Na estacao o Kong atende nas duas
+        // portas (conferido: 80 e 8050 devolvem 200).
+        //
+        // 🐞 No agente Mac, 127.0.0.1:80 nao serve nada. E encaminhar a porta
+        // 80 para la' nao e' possivel: encaminhamento reverso abaixo de 1024
+        // exigiria root no Mac. A 8050 cabe sem privilegio, e o tunel a leva.
+        //
+        // Mesma porta nos dois lugares DE PROPOSITO: um valor por ambiente e'
+        // onde esse arranjo apodrece calado.
+        PORTA_GATEWAY = '8050'
+        SONAR_URL   = 'http://sonar.hmg:8050'
         SONAR_CHAVE = '{dir}'
 
         // ⚠️ O PRD AINDA NAO EXISTE.
@@ -299,8 +338,40 @@ pipeline {{
 
     stages {{
 
+    // =======================================================================
+    // METADE 1 -- CI: construir e testar. PODE sair da maquina de producao.
+    // =======================================================================
+    // Todos os estagios daqui ate' `Publicar` compartilham UM workspace, num
+    // agente so'.
+    stage('CI') {{
+        agent {{ label params.AGENTE_CI }}
+
+        stages {{
+
         stage('Preparo') {{
             steps {{
+                // 🐞 A TAG TEM DE SER RECALCULADA AQUI.
+                //
+                // Com `agent none` no topo, o bloco `environment` pode ser
+                // avaliado ANTES de qualquer checkout, e `env.GIT_COMMIT` vir
+                // nulo. A TAG cairia para `local`, as imagens seriam publicadas
+                // como `<projeto>:local`, o deploy aplicaria `:local` -- E A
+                // ESTEIRA FICARIA VERDE, com o cluster rodando sabe-se la' qual
+                // codigo.
+                //
+                // ⚠️ O `error` abaixo nao e' zelo. Sem ele o unico sintoma seria
+                // uma tag estranha no registro, descoberta meses depois.
+                script {{
+                    if (env.GIT_COMMIT) {{
+                        env.TAG = env.GIT_COMMIT.take(12)
+                    }}
+                    echo "TAG desta build: ${{env.TAG}}  (agente: ${{env.NODE_NAME}})"
+                    if (env.TAG == 'local' && env.BRANCH_NAME == 'main') {{
+                        error("TAG=local na main: o checkout nao entregou GIT_COMMIT. " +
+                              "Publicar assim sobrescreveria a tag 'local' no registro " +
+                              "e o deploy nao saberia que codigo esta rodando.")
+                    }}
+                }}
                 sh '''
                     set -e
                     echo "==> commit: $TAG"
@@ -351,15 +422,35 @@ pipeline {{
                     #
                     # Construir e adiavel; produzir 502 nao e. Entao a esteira
                     # ESPERA a carga baixar, e desiste se nao baixar.
-                    NUCLEOS=$(nproc)
+                    # ===============================================================
+                    # ⚠️ ESTA GUARDA SO' FAZ SENTIDO ONDE A PRODUCAO MORA
+                    # ===============================================================
+                    # Ela existe porque a distro `prd` E' a producao: construir ali
+                    # concorre com quem serve os dominios. Num agente dedicado (o
+                    # MacBook) nao ha' producao para proteger.
+                    #
+                    # 🐞 E as duas fontes que ela lia NAO EXISTEM no macOS:
+                    #     nproc          -> e' `sysctl -n hw.ncpu`
+                    #     /proc/loadavg  -> e' `sysctl -n vm.loadavg`
+                    # Sem isto `NUCLEOS` vinha vazio e `TETO_CARGA` virava erro de
+                    # aritmetica -- num estagio cujo proposito e' decidir se pode
+                    # prosseguir.
+                    if [ -r /proc/loadavg ]; then
+                        NUCLEOS=$(nproc)
+                        ler_carga() {{ awk '{{print int($1)}}' /proc/loadavg; }}
+                    else
+                        # macOS: `vm.loadavg` sai como "{{ 2.60 2.32 2.12 }}".
+                        NUCLEOS=$(sysctl -n hw.ncpu)
+                        ler_carga() {{ sysctl -n vm.loadavg | awk '{{print int($2)}}'; }}
+                    fi
                     TETO_CARGA=$(( NUCLEOS * 2 ))
                     for _ in $(seq 1 30); do
-                        CARGA=$(awk '{{print int($1)}}' /proc/loadavg)
+                        CARGA=$(ler_carga)
                         [ "$CARGA" -le "$TETO_CARGA" ] && break
                         echo "==> carga $CARGA acima do teto $TETO_CARGA ($NUCLEOS nucleos) -- esperando"
                         sleep 20
                     done
-                    CARGA=$(awk '{{print int($1)}}' /proc/loadavg)
+                    CARGA=$(ler_carga)
                     if [ "$CARGA" -gt "$TETO_CARGA" ]; then
                         echo "ERRO: carga $CARGA ainda acima do teto $TETO_CARGA depois de 10 min."
                         echo "Construir agora arriscaria derrubar producao com 502."
@@ -402,6 +493,25 @@ pipeline {{
 """
 
 RODAPE = """
+        }}   // fim dos estagios de CI
+    }}       // fim do estagio 'CI'
+
+    // =======================================================================
+    // METADE 2 -- CD: implantar. TEM de ficar na estacao.
+    // =======================================================================
+    // ⚠️ `built-in` EXPLICITO, e nao herdado do parametro. O `kubectl` daqui
+    // fala com o k3s desta distro sem `--kubeconfig`; de um agente remoto ele
+    // nao falaria com cluster nenhum, e o estagio morreria no meio de um
+    // deploy -- que e' o pior momento possivel para descobrir isso.
+    //
+    // Estes estagios ganham um workspace NOVO (agente diferente), entao fazem
+    // seu proprio checkout. Precisam so' dos manifestos em `k8s/` e da `$TAG`,
+    // que viaja por `env` -- nao dependem de nada que o CI deixou em disco.
+    stage('CD') {{
+        agent {{ label 'built-in' }}
+
+        stages {{
+
         stage('Implantar em homologacao') {{
             when {{ branch 'main' }}
             steps {{
@@ -522,7 +632,10 @@ RODAPE = """
                 '''
             }}
         }}
-{promocao}    }}
+{promocao}
+        }}   // fim dos estagios de CD
+    }}       // fim do estagio 'CD'
+    }}
 
     post {{
         failure {{
