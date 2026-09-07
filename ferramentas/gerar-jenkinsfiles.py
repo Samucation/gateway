@@ -493,11 +493,12 @@ pipeline {{
 """
 
 RODAPE = """
-        }}   // fim dos estagios de CI
-    }}       // fim do estagio 'CI'
+        }}   // fim dos estagios de IMAGEM
+    }}       // fim do estagio 'IMAGEM'
+
 
     // =======================================================================
-    // METADE 2 -- CD: implantar. TEM de ficar na estacao.
+    // METADE 3 -- CD: implantar. TEM de ficar na estacao.
     // =======================================================================
     // ⚠️ `built-in` EXPLICITO, e nao herdado do parametro. O `kubectl` daqui
     // fala com o k3s desta distro sem `--kubeconfig`; de um agente remoto ele
@@ -679,8 +680,46 @@ RODAPE = """
 }}
 """
 
+ABRE_IMAGEM = '''
+        }   // fim dos estagios de teste
+    }       // fim do estagio 'CI'
+
+    // =======================================================================
+    // METADE 2 -- IMAGEM: construir e publicar. FICA NA ESTACAO.
+    // =======================================================================
+    // ⚠️ A razao e' MEDIDA, e nao preferencia.
+    //
+    // Os testes ganharam indo para o Mac (441s -> 240s no cartorio). A
+    // CONSTRUCAO DE IMAGEM, nao: ela tem de sair amd64 para o cluster, e no
+    // Mac (arm64) isso EMULA tudo que o Dockerfile roda -- `mvn package`,
+    // `npm ci`, `apt-get`.
+    //
+    // 🐞 Medido em 07/09/2026, e foi pior que lento:
+    //
+    //     cartorio, 3 imagens .... 6189s (103 min) e FALHOU
+    //     sigma-payments ......... 5281s (88 min) e FALHOU
+    //
+    //     ERROR: failed to connect to the docker API at
+    //     unix:///Users/.../.orbstack/run/docker.sock
+    //
+    // A emulacao prolongada DERRUBOU o daemon do Docker do Mac -- o agente
+    // saiu do ar no meio da build, duas vezes.
+    //
+    // ⚠️ O `agent` fica AQUI, no pai, e nao em `Construir`: aquele estagio usa
+    // `parallel` quando ha mais de uma imagem, e o Jenkins RECUSA `agent` em
+    // estagio com `parallel` ("agent is not allowed in stage ... as it
+    // contains parallel or matrix stages").
+    //
+    // O caminho para trazer isto ao Mac e' compilar o artefato NATIVO (arm64)
+    // e montar a imagem amd64 so' com `COPY`, sem nenhum `RUN`.
+    stage('IMAGEM') {
+        agent { label 'built-in' }
+
+        stages {
+'''
+
 for p in PROJETOS:
-    partes = [CABECALHO.format(dir=p['dir'], reg=REG, ns=p['ns'])]
+    partes = [CABECALHO.format(dir=p['dir'], reg=REG, ns=p['ns']), ABRE_IMAGEM]
 
     # Estagio extra: buscar o repositorio irmao, quando houver.
     if p.get('extra_checkout'):
@@ -692,6 +731,7 @@ for p in PROJETOS:
         // Por isso este pipeline busca o portal e constroi os dois. O repo do
         // portal nao tem Jenkinsfile, entao a pasta de organizacao nao cria job
         // para ele -- fica de fora sem precisar de exclusao.
+
         stage('Buscar o portal') {
             steps {
                 dir('_portal') {
