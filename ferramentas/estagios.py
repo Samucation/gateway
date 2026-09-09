@@ -148,13 +148,24 @@ TESTES_NODE = """
                     # `pg_isready`, e nao porta TCP: a porta abre ANTES de o
                     # Postgres aceitar conexao, e quem conectasse no intervalo
                     # tomaria erro num servidor ja dado como pronto.
+                    #
+                    # ⚠️ 180s, e nao 60s. Este container roda `initdb` do zero, e
+                    # `initdb` e' I/O puro: com o cluster puxando imagem ao mesmo
+                    # tempo, ele passa dos 60s. A build #131 do live-flow morreu
+                    # assim -- o log mostrava "post-bootstrap initialization ...
+                    # ok" no segundo em que a espera estourou.
+                    #
+                    # Esperar mais nao custa nada quando o disco esta livre: o
+                    # laco sai no primeiro `pg_isready` que responde. O que custa
+                    # e' reprovar uma build de ~35min por um banco que estava a
+                    # segundos de ficar pronto.
                     pronto=0
-                    for i in $(seq 1 30); do
+                    for i in $(seq 1 90); do
                         if docker exec $PGC pg_isready -U teste -p $PGP >/dev/null 2>&1; then pronto=1; break; fi
                         sleep 2
                     done
                     if [ "$pronto" != "1" ]; then
-                        echo "ERRO: o Postgres de teste nao subiu em 60 segundos"
+                        echo "ERRO: o Postgres de teste nao subiu em 180 segundos"
                         docker logs $PGC 2>&1 | tail -10
                         docker rm -fv $PGC >/dev/null 2>&1 || true
                         exit 1
@@ -664,13 +675,15 @@ SONAR_MAVEN = """
                         # `pg_isready`, e nao porta TCP: a porta abre ANTES de o
                         # Postgres aceitar conexao, e quem conectasse no intervalo
                         # tomaria erro num servidor ja dado como pronto.
+                        # ⚠️ 180s pelo mesmo motivo do outro estagio: `initdb` e'
+                        # I/O puro e passa dos 60s quando o disco esta disputado.
                         pronto=0
-                        for i in $(seq 1 30); do
+                        for i in $(seq 1 90); do
                             if docker exec $PGJ pg_isready -U teste -p $PGJP >/dev/null 2>&1; then pronto=1; break; fi
                             sleep 2
                         done
                         if [ "$pronto" != "1" ]; then
-                            echo "ERRO: o Postgres de teste nao subiu em 60 segundos"
+                            echo "ERRO: o Postgres de teste nao subiu em 180 segundos"
                             docker logs $PGJ 2>&1 | tail -10
                             docker rm -fv $PGJ >/dev/null 2>&1 || true
                             exit 1
