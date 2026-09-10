@@ -436,7 +436,48 @@ SONAR_GENERICO = """
                             Darwin) SONAR_ALVO=host-gateway ;;
                             *)      SONAR_ALVO=127.0.0.1 ;;
                         esac
-                        docker run --rm --network host --add-host sonar.hmg:$SONAR_ALVO -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" $ARGS_TESTE -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt
+                        # ===========================================================
+                        # 🔴 NOVA TENTATIVA quando o SERVIDOR cede -- e so entao
+                        # ===========================================================
+                        # A build #139 do live-flow (10/09/2026) foi reprovada por
+                        # isto, com o codigo LIMPO:
+                        #
+                        #   Failed to upload report: Error 502 on /api/ce/submit
+                        #   Analysis report compressed in 61597ms   <- 61s p/ 10 MB
+                        #
+                        # A maquina estava com carga 41. O relatorio tem ~10 MB
+                        # comprimido, e o envio e' o momento mais pesado da analise
+                        # inteira -- e o unico que depende do servidor responder.
+                        #
+                        # ⚠️ Insistir e' seguro AQUI e so aqui: falha do scanner
+                        # nao e' "o codigo tem problema". Violacao e cobertura nao
+                        # derrubam o scanner -- elas derrubam o PORTAO, que e o
+                        # estagio seguinte. Se o scanner morreu, foi rede, servidor
+                        # ou disco.
+                        #
+                        # ⚠️ E so insiste quando a mensagem PARECE disso. Erro de
+                        # configuracao (chave errada, pasta inexistente) falha de
+                        # novo igual, e repetir tres vezes so gasta 40 minutos para
+                        # chegar na mesma conclusao.
+                        TENTATIVAS=3
+                        deu_certo=0
+                        for tentativa in $(seq 1 $TENTATIVAS); do
+                            if docker run --rm --network host --add-host sonar.hmg:$SONAR_ALVO -v "$PWD:/usr/src" -e SONAR_HOST_URL=$SONAR_URL -e SONAR_TOKEN=$SONAR_TOKEN sonarsource/sonar-scanner-cli:latest -Dsonar.projectKey=$SONAR_CHAVE -Dsonar.projectName=$SONAR_CHAVE -Dsonar.sources=. -Dsonar.exclusions="$EXC" $ARGS_TESTE -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info 2>&1 | tee saida-sonar.txt; then
+                                deu_certo=1
+                                break
+                            fi
+                            if ! grep -qE "Error 5[0-9][0-9] on|Failed to upload report|Connection reset|Read timed out|connect timed out|Broken pipe" saida-sonar.txt; then
+                                echo "==> o scanner falhou, e NAO parece rede/servidor -- nao insisto"
+                                break
+                            fi
+                            if [ "$tentativa" = "$TENTATIVAS" ]; then
+                                echo "==> $TENTATIVAS tentativas, o servidor do Sonar nao aceitou o relatorio"
+                                break
+                            fi
+                            echo "==> tentativa $tentativa: o servidor do Sonar cedeu; esperando 45s"
+                            sleep 45
+                        done
+                        [ "$deu_certo" = "1" ] || exit 1
                         grep -oE "api/ce/task[?]id=[A-Za-z0-9_-]+" saida-sonar.txt | tail -1 | cut -d= -f2 > sonar-task.txt
                         echo "==> tarefa: $(cat sonar-task.txt)"
                     '''
@@ -721,6 +762,18 @@ SONAR_MAVEN = """
                             Darwin) SONAR_ALVO=host-gateway ;;
                             *)      SONAR_ALVO=127.0.0.1 ;;
                         esac
+                        # ⚠️ AQUI NAO HA NOVA TENTATIVA, e e' de proposito.
+                        #
+                        # O estagio de JavaScript ganhou um laco que insiste
+                        # quando o SERVIDOR do Sonar cede (502 ao receber o
+                        # relatorio) -- ver o comentario la'. Aqui nao dá: este
+                        # comando roda `mvn test` E a analise JUNTOS. Insistir
+                        # repetiria a bateria inteira, e um teste instavel viraria
+                        # "passou na segunda" -- que e' pior do que a build
+                        # vermelha, porque esconde o defeito em vez de mostrar.
+                        #
+                        # Para ganhar a nova tentativa aqui, primeiro seria preciso
+                        # SEPARAR teste de analise em duas invocacoes.
                         if docker run --rm --network host --add-host sonar.hmg:$SONAR_ALVO -e SIGMA_TEST_PG_HOST=127.0.0.1 -e SIGMA_TEST_PG_PORT=$PGJP -e SIGMA_TEST_PG_DB=postgres -e SIGMA_TEST_PG_USER=teste -e SIGMA_TEST_PG_PASSWORD=teste -v "$PWD:/app" -w /app -v jenkins-m2:/root/.m2 maven:3.9-eclipse-temurin-25 mvn -B test org.jacoco:jacoco-maven-plugin:report org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.host.url=$SONAR_URL -Dsonar.token=$SONAR_TOKEN -Dsonar.projectKey=$SONAR_CHAVE 2>&1 | tee saida-sonar.txt; then
                             ok=1
                         else
