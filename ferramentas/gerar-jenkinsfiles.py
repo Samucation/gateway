@@ -274,7 +274,19 @@ pipeline {{
         // A TAG E O COMMIT, nao a data. Data nao responde "que codigo esta
         // rodando?" -- duas builds do mesmo minuto colidem, e um rollback nao
         // sabe para onde voltar.
-        TAG      = "${{env.GIT_COMMIT ? env.GIT_COMMIT.take(12) : 'local'}}"
+        // 🐞 A TAG **NAO** MORA MAIS AQUI -- e a razao e' sutil.
+        //
+        // O bloco `environment` do pipeline e' REAVALIADO a cada estagio, e
+        // sobrescreve qualquer `env.TAG` atribuido num `script`. Enquanto ela
+        // esteve aqui, o conserto no `Preparo` era desfeito silenciosamente e
+        // a TAG voltava a `local`.
+        //
+        // Medido nas builds #8 e #9 do sigma-payments (08/09/2026): o
+        // checkout trouxe o commit CERTO, o `script` calculou a tag certa, e
+        // o `echo` seguinte imprimia `local` assim mesmo.
+        //
+        // ⚠️ Agora ela e' definida UMA vez, no `Preparo`, lendo do proprio
+        // git. Nao a traga de volta para ca'.
         // ⚠️ DOIS `kubectl`, porque sao DOIS clusters -- e desde 24/08/2026
         // nenhum deles e mais o da VM.
         //
@@ -362,9 +374,22 @@ pipeline {{
                 // ⚠️ O `error` abaixo nao e' zelo. Sem ele o unico sintoma seria
                 // uma tag estranha no registro, descoberta meses depois.
                 script {{
-                    if (env.GIT_COMMIT) {{
-                        env.TAG = env.GIT_COMMIT.take(12)
-                    }}
+                    // 🐞 `env.GIT_COMMIT` VEM NULO no agente remoto.
+                    //
+                    // Medido em 08/09/2026, build #8 do sigma-payments, a
+                    // primeira real com a esteira partida: rodou no `mac-arm`,
+                    // e o `echo` mostrou `TAG desta build: local`. A guarda
+                    // abaixo barrou -- corretamente -- mas a causa e' esta.
+                    //
+                    // Com `agent none` no topo e o checkout implicito
+                    // acontecendo dentro do estagio, a variavel nem sempre
+                    // chega ao `environment`. Ler do PROPRIO git resolve, e
+                    // vale em qualquer agente: o repositorio esta ali, e o
+                    // commit e' o que ele diz ser.
+                    // A TAG e' definida AQUI, uma vez, e nao no
+                    // `environment` -- ver a nota la' em cima.
+                    env.TAG = (env.GIT_COMMIT ?: sh(script: 'git rev-parse HEAD',
+                                                    returnStdout: true).trim()).take(12)
                     echo "TAG desta build: ${{env.TAG}}  (agente: ${{env.NODE_NAME}})"
                     if (env.TAG == 'local' && env.BRANCH_NAME == 'main') {{
                         error("TAG=local na main: o checkout nao entregou GIT_COMMIT. " +
@@ -759,6 +784,41 @@ ABRE_IMAGEM = '''
         stages {
 '''
 
+# ---------------------------------------------------------------------------
+# 🐞 CHAVE A MAIS: o molde ja' saiu daqui com uma, e ninguem viu.
+#
+# Medido em 12/09/2026: o conserto da TAG (build #8-#11 do sigma-payments)
+# deixou um `}}` orfao logo depois do bloco `script`. Os Jenkinsfiles no
+# repositorio estavam certos porque foram consertados A MAO -- entao a proxima
+# regeneracao QUEBRARIA OS OITO de uma vez, e o erro do Groovy apontaria para
+# um lugar qualquer no meio do arquivo.
+#
+# As duas guardas que ja existiam (contrabarra, aspas triplas impares) nao
+# pegam isto. Esta pega, e pelo mesmo criterio das outras: o gerador fica
+# VERMELHO antes de escrever, em vez de a esteira ficar vermelha depois.
+#
+# ⚠️ So conta o que o Groovy ve como codigo: dentro de `'''` e depois de `//`
+# as chaves sao texto. Sem essa exclusao a conta acusaria o comentario que fala
+# de `when { branch 'main' }`.
+def chaves_do_codigo(texto):
+    saldo = 0
+    dentro_de_bloco = False
+    for linha in texto.split('\n'):
+        if linha.count(chr(39) * 3) % 2 == 1:
+            dentro_de_bloco = not dentro_de_bloco
+            continue
+        if dentro_de_bloco:
+            continue
+        # `//` so' abre comentario quando nao e' o de `http://`.
+        corte = linha.find('//')
+        while corte > 0 and linha[corte - 1] == ':':
+            corte = linha.find('//', corte + 2)
+        if corte >= 0:
+            linha = linha[:corte]
+        saldo += linha.count('{') - linha.count('}')
+    return saldo
+
+
 for p in PROJETOS:
     partes = [CABECALHO.format(dir=p['dir'], reg=REG, ns=p['ns'])]
 
@@ -1096,6 +1156,12 @@ for p in PROJETOS:
     # o delimitador dentro do que ele delimita.
     assert texto.count(chr(39) * 3) % 2 == 0, (
         '%s: numero IMPAR de aspas triplas -- algum bloco nao fecha' % p['dir'])
+
+    saldo = chaves_do_codigo(texto)
+    assert saldo == 0, (
+        '%s: chaves NAO fecham (saldo %+d) -- ver a nota de `chaves_do_codigo`. '
+        'Saldo negativo e chave a mais; positivo, chave faltando.'
+        % (p['dir'], saldo))
 
     caminho = os.path.join(p['dir'], 'Jenkinsfile')
     io.open(caminho, 'w', encoding='utf-8', newline='\n').write(texto)

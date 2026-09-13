@@ -847,7 +847,19 @@ PORTAO = """
                         #    ANTERIOR -- verde de ontem num codigo que quebrou hoje.
                         st=""
                         for i in $(seq 1 60); do
-                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1:$PORTA_GATEWAY/api/ce/task?id=$TAREFA" | grep -oE "PENDING|IN_PROGRESS|SUCCESS|FAILED|CANCELED" | head -1)
+                            # 🐞 11/09/2026, live-flow #150: o `|| true` NAO e'
+                            # descuido -- e' o conserto.
+                            #
+                            # `grep` que nao acha nada sai com 1. Com `set -e` e
+                            # `pipefail`, UMA resposta vazia do Sonar matava o
+                            # script INTEIRO, no meio de um laco cujo proposito
+                            # e' justamente tentar de novo. A build morreu com o
+                            # portao APROVADO (cobertura 86,4%, zero violacoes):
+                            # 77 minutos perdidos por um `grep` que nao casou.
+                            #
+                            # ⚠️ NAO afrouxa o portao: quem reprova e' o
+                            # `[ "$st" != "SUCCESS" ]` depois do laco.
+                            st=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1:$PORTA_GATEWAY/api/ce/task?id=$TAREFA" | grep -oE "PENDING|IN_PROGRESS|SUCCESS|FAILED|CANCELED" | head -1 || true)
                             case "$st" in
                                 SUCCESS)         break ;;
                                 FAILED|CANCELED) echo "a analise FALHOU no Sonar (estado $st)"; exit 1 ;;
@@ -861,7 +873,11 @@ PORTAO = """
 
                         # 2. So AGORA ler o portao.
                         corpo=$(curl -s -u "$SONAR_TOKEN:" -H "Host: sonar.hmg" "http://127.0.0.1:$PORTA_GATEWAY/api/qualitygates/project_status?projectKey=$SONAR_CHAVE")
-                        r=$(echo "$corpo" | grep -oE "OK|ERROR|WARN|NONE" | head -1)
+                        # ⚠️ `|| true` pelo mesmo motivo, e aqui e' PIOR: sem
+                        # ele, um corpo inesperado mata o script ANTES de
+                        # imprimir a mensagem que diz o que consertar. Continua
+                        # fail-closed: `r` vazio nao e' "OK".
+                        r=$(echo "$corpo" | grep -oE "OK|ERROR|WARN|NONE" | head -1 || true)
                         echo "==> portao de qualidade: ${r:-SEM RESPOSTA}"
                         echo "    detalhes em $SONAR_URL/dashboard?id=$SONAR_CHAVE"
 
